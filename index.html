@@ -1,10 +1,17 @@
 <html>
 <head>
 <meta charset="UTF-8">
+<title>系统日志</title>
 </head>
 <body>
 <h1>系统日志</h1>
-<p>欢迎来到本站。</p>
-<p>这是一个综合性网站，用于记录与分享各类资讯和内容。</p>
+<p id="message">这是一个综合性动态网站。</p>
+<button onclick="showResponse()">点击获取即时响应</button>
+
+<script>
+function showResponse() {
+  document.getElementById("message").innerText = "您已成功触发动态交互，系统运行正常。";
+}
+</script>
 </body>
 </html>
