@@ -16,25 +16,16 @@ jobs:
         uses: sarisia/actions-readme-feed@v1
         with:
           url: |
-            "https://zaobao.com"
+            "https://zaobao.com/rss/world"
+"
             "https://bbci.co.uk"
-            "https://bbci.co.uk"
-            "https://apnews.com"
+            "http://cnn.com"
+            "https://allrss.org"
             "https://36kr.com"
             "https://ifanr.com"
-            "https://techcrunch.com"
-            "https://theverge.com"
-            "https://reutersagency.com"
-            "https://theinitium.com"
-            "https://nytimes.com"
-            "https://wallstreetcn.com"
-            "https://cnbc.com"
-            "https://ft.com"
-          max_post_num: 5
-          file: "news-list.md" # 抓取的新闻会写入这个文件
-          format: |
-            - [${title}](${url}) (${date})
-            
+          max_entry: 5
+          file: "news-list.md"
+
       - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
