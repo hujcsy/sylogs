@@ -1,0 +1,19 @@
+name: Fetch News
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  fetch-news:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fetch RSS Feeds
+        uses: sarisia/actions-readme-feed@v1
+        with:
+          url: |
+            https://zaobao.com
+            https://bbci.co.uk
