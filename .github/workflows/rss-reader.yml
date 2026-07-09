@@ -1,74 +1,56 @@
-name: Fetch News
+name: 獲取新聞
+
 on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   fetch-news:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: 結帳代碼
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 安裝 Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.12'
 
-      - name: Install dependencies
+      - name: 安裝依賴
         run: pip install feedparser
 
-      - name: Run Fetch Script and Generate Category Page
+      - name: 運行抓取腳本
         run: |
-          python -c '
+          python -c "
           import feedparser, os, time
-          
-          # 建立新聞目錄
-          os.makedirs("news", exist_ok=True)
-          
-          # 抓取新聞並生成獨立 HTML
-          urls = ["https://zaobao.com", "https://bbci.co.uk"]
-          news_items = []
-          for url in urls:
-              feed = feedparser.parse(url)
-              for entry in feed.entries[:3]:
-                  title = entry.title
-                  link = entry.link
-                  summary = entry.get("summary", "")
-                  filename = f"news/{int(time.time())}_{title[:10]}.html"
-                  with open(filename, "w", encoding="utf-8") as f:
-                      f.write(f"<html><head><title>{title}</title><meta charset=\x27utf-8\x27></head><body><h1>{title}</h1><p>{summary}</p><a href=\x27{link}\x27>閱讀原文</a></body></html>")
-          
-          # 自動化核心：在雲端強行生成 news/index.html，完美對齊您的四大選單
-          index_content = """<!DOCTYPE html>
-          <html lang="zh-Hant">
-          <head>
-              <meta charset="UTF-8">
-              <title>新聞追蹤</title>
-          </head>
+          os.makedirs('news', exist_ok=True)
+          urls = ['https://zaobao.com', 'https://feeds.bbci.co.uk/news/world/rss.xml']
+          index_content = '''<!DOCTYPE html>
+          <html lang='zh-Hant'>
+          <head><meta charset='UTF-8'><title>新聞追蹤</title></head>
           <body>
-              <h1>新聞追蹤</h1>
-              <ul>
-                  <li><a href="../news/">時事</a></li>
-                  <li><a href="../news/">科技動態</a></li>
-                  <li><a href="../news/">焦點新聞</a></li>
-                  <li><a href="../news/">金融</a></li>
-              </ul>
-              <br>
-              <a href="../">返回網站首頁</a>
+          <h1>新聞追蹤</h1>
+          <ul>
+            <li><a href='../news/'>時事</a></li>
+            <li><a href='../news/'>科技動態</a></li>
+            <li><a href='../news/'>焦點新聞</a></li>
+            <li><a href='../news/'>金融</a></li>
+          </ul>
+          <br><a href='../'>回網站首頁</a>
           </body>
-          </html>"""
-          
-          with open("news/index.html", "w", encoding="utf-8") as f:
+          </html>'''
+          with open('news/index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
-          '
+          "
 
-      - name: Commit and Push Changes
+      - name: 提交並推送更改
         run: |
-          git config --global user.name "github-actions[bot]"
-                  git config --global user.email "github-actions[bot]@://github.com"
-          git add news/*
-
-          git commit -m "Auto update news files and category index" || exit 0
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add news/
+          git commit -m '自動更新新聞檔案和索引' || echo '無內容變更'
           git push
