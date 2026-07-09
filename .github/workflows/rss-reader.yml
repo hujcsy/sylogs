@@ -11,9 +11,36 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Fetch RSS Feeds
-        uses: sarisia/actions-readme-feed@v1
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          url: |
-            https://zaobao.com
-            https://bbci.co.uk
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install feedparser
+
+      - name: Run Fetch Script
+        run: |
+          python -c '
+          import feedparser, os, time
+          urls = ["https://zaobao.com", "https://bbci.co.uk"]
+          os.makedirs("news", exist_ok=True)
+          for url in urls:
+              feed = feedparser.parse(url)
+              for entry in feed.entries[:3]:
+                  title = entry.title
+                  link = entry.link
+                  summary = entry.get("summary", "")
+                  filename = f"news/{int(time.time())}_{title[:10]}.html"
+                  with open(filename, "w", encoding="utf-8") as f:
+                      f.write(f"<html><head><title>{title}</title><meta charset=\x27utf-8\x27></head><body><h1>{title}</h1><p>{summary}</p><a href=\x27{link}\x27>閱讀原文</a></body></html>")
+          '
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@://github.com"
+
+          git add news/*.html
+          git commit -m "Auto fetch latest news pages" || exit 0
+          git push
