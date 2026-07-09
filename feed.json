@@ -1,0 +1,14 @@
+{
+    "version": "https://jsonfeed.org/version/1",
+    "title": "SY Horizon/ SY 视野",
+    "description": "",
+    "home_page_url": "https://sylogs.com",
+    "feed_url": "https://sylogs.com/feed.json",
+    "user_comment": "",
+    "icon": "https://sylogs.com/media/website/logo.png",
+    "author": {
+        "name": "shengyan chi"
+    },
+    "items": [
+    ]
+}
