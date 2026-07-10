@@ -27,19 +27,19 @@ jobs:
           os.makedirs('news', exist_ok=True)
           index_content = '''<!DOCTYPE html>
           <html>
-          <head><meta charset='UTF-8'><title>新聞追蹤</title></head>
+          <head><meta charset='UTF-8'><title>News</title></head>
           <body>
-          <h1>新聞追蹤</h1>
+          <h1>News</h1>
           <ul>
-            <li><a href='news/'>時事</a></li>
-            <li><a href='news/'>科技動態</a></li>
-            <li><a href='news/'>焦點新聞</a></li>
-            <li><a href='news/'>金融</a></li>
+            <li><a href='/sylogs/news/index.html'>Current Events</a></li>
+            <li><a href='/sylogs/news/index.html'>Tech Trends</a></li>
+            <li><a href='/sylogs/news/index.html'>Focus</a></li>
+            <li><a href='/sylogs/news/index.html'>Finance</a></li>
           </ul>
-          <br><a href='./'>回網站首頁</a>
+          <br><a href='/sylogs/'>Back to Home</a>
           </body>
           </html>'''
-          with open('index.html', 'w', encoding='utf-8') as f:
+          with open('news/index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
           "
 
