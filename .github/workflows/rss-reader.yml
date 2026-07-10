@@ -20,29 +20,26 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: 安裝依賴
-        run: pip install feedparser
-
       - name: 運行抓取腳本
         run: |
           python -c "
           import os
           os.makedirs('news', exist_ok=True)
           index_content = '''<!DOCTYPE html>
-          <html lang='zh-Hant'>
+          <html>
           <head><meta charset='UTF-8'><title>新聞追蹤</title></head>
           <body>
           <h1>新聞追蹤</h1>
           <ul>
-            <li><a href='/news/'>時事</a></li>
-            <li><a href='/news/'>科技動態</a></li>
-            <li><a href='/news/'>焦點新聞</a></li>
-            <li><a href='/news/'>金融</a></li>
+            <li><a href='news/'>時事</a></li>
+            <li><a href='news/'>科技動態</a></li>
+            <li><a href='news/'>焦點新聞</a></li>
+            <li><a href='news/'>金融</a></li>
           </ul>
-          <br><a href='/'>回網站首頁</a>
+          <br><a href='./'>回網站首頁</a>
           </body>
           </html>'''
-          with open('news/index.html', 'w', encoding='utf-8') as f:
+          with open('index.html', 'w', encoding='utf-8') as f:
               f.write(index_content)
           "
 
@@ -50,6 +47,6 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add news/
-          git commit -m '自動更新新聞檔案和索引' || echo '無內容變更'
+          git add .
+          git commit -m '更新新聞頁面' || echo '無變更'
           git push
