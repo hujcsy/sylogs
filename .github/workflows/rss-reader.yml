@@ -26,21 +26,20 @@ jobs:
       - name: 運行抓取腳本
         run: |
           python -c "
-          import feedparser, os, time
+          import os
           os.makedirs('news', exist_ok=True)
-          urls = ['https://zaobao.com', 'https://feeds.bbci.co.uk/news/world/rss.xml']
           index_content = '''<!DOCTYPE html>
           <html lang='zh-Hant'>
           <head><meta charset='UTF-8'><title>新聞追蹤</title></head>
           <body>
           <h1>新聞追蹤</h1>
           <ul>
-            <li><a href='../news/'>時事</a></li>
-            <li><a href='../news/'>科技動態</a></li>
-            <li><a href='../news/'>焦點新聞</a></li>
-            <li><a href='../news/'>金融</a></li>
+            <li><a href='/news/'>時事</a></li>
+            <li><a href='/news/'>科技動態</a></li>
+            <li><a href='/news/'>焦點新聞</a></li>
+            <li><a href='/news/'>金融</a></li>
           </ul>
-          <br><a href='../'>回網站首頁</a>
+          <br><a href='/'>回網站首頁</a>
           </body>
           </html>'''
           with open('news/index.html', 'w', encoding='utf-8') as f:
