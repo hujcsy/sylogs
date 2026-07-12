@@ -1,10 +1,8 @@
 name: Fetch news and send to Cloudflare D1
-
 on:
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
-
 jobs:
   fetch-and-send:
     runs-on: ubuntu-latest
@@ -19,14 +17,12 @@ jobs:
           from urllib.parse import urlencode
           from urllib.request import Request, urlopen
           import xml.etree.ElementTree as ET
-
           categories = [
               ("時事", "國際 OR 世界"),
               ("科技動態", "科技"),
               ("焦點新聞", "熱門新聞"),
               ("金融", "金融 OR 財經"),
           ]
-
           def get_items(query):
               url = "https://news.google.com/rss/search?" + urlencode({
                   "q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"
@@ -43,7 +39,6 @@ jobs:
                   if title and link:
                       items.append({"title": title, "link": link, "source": source})
               return items
-
           all_articles = []
           for cat_name, query in categories:
               try:
@@ -54,10 +49,8 @@ jobs:
                   print(f"{cat_name}: 抓到 {len(items)} 筆")
               except Exception as e:
                   print(f"{cat_name} 抓取失敗: {e}")
-
           payload = json.dumps({"articles": all_articles}).encode("utf-8")
           secret = os.environ["INGEST_SECRET"]
-
           req = Request(
               "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest",
               data=payload,
@@ -65,6 +58,7 @@ jobs:
               headers={
                   "Content-Type": "application/json",
                   "Authorization": f"Bearer {secret}",
+                  "User-Agent": "Mozilla/5.0 (compatible; sylogs-bot/1.0)",
               },
           )
           with urlopen(req, timeout=120) as resp:
