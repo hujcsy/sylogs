@@ -1,33 +1,30 @@
-name: Update news category pages
+name: Fetch news and send to Cloudflare D1
 
 on:
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  update-news:
+  fetch-and-send:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch RSS and build pages
+      - name: Fetch RSS and POST to Cloudflare Worker
+        env:
+          INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
         run: |
           python - <<'PY'
-          from html import escape
-          from pathlib import Path
+          import json
+          import os
           from urllib.parse import urlencode
           from urllib.request import Request, urlopen
           import xml.etree.ElementTree as ET
 
           categories = [
-              ("時事", "shi-shi", "國際 OR 世界"),
-              ("科技動態", "ke-ji-dong-tai", "科技"),
-              ("焦點新聞", "jiao-dian-xin-wen", "熱門新聞"),
-              ("金融", "jin-rong", "金融 OR 財經"),
+              ("時事", "國際 OR 世界"),
+              ("科技動態", "科技"),
+              ("焦點新聞", "熱門新聞"),
+              ("金融", "金融 OR 財經"),
           ]
 
           def get_items(query):
@@ -37,41 +34,39 @@ jobs:
               req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
               with urlopen(req, timeout=30) as response:
                   root = ET.fromstring(response.read())
-
               items = []
-              for item in root.findall("./channel/item")[:20]:
+              for item in root.findall("./channel/item")[:15]:
                   title = (item.findtext("title") or "").strip()
                   link = (item.findtext("link") or "").strip()
                   source = item.find("source")
                   source = source.text.strip() if source is not None and source.text else "Google 新聞"
                   if title and link:
-                      items.append((title, link, source))
+                      items.append({"title": title, "link": link, "source": source})
               return items
 
-          def build_page(title, items):
-              rows = "".join(
-                  f'<article><h3><a href="{escape(link, quote=True)}" target="_blank" rel="noopener noreferrer">{escape(headline)}</a></h3><p>{escape(source)}</p></article>'
-                  for headline, link, source in items
-              ) or "<p>目前沒有可顯示的新聞，請稍後再試。</p>"
+          all_articles = []
+          for cat_name, query in categories:
+              try:
+                  items = get_items(query)
+                  for it in items:
+                      it["category"] = cat_name
+                      all_articles.append(it)
+                  print(f"{cat_name}: 抓到 {len(items)} 筆")
+              except Exception as e:
+                  print(f"{cat_name} 抓取失敗: {e}")
 
-              return f'''<!doctype html>
-          <html lang="zh-Hant"><head><meta charset="utf-8">
-          <meta name="viewport" content="width=device-width,initial-scale=1">
-          <title>{escape(title)} - SY Horizon</title>
-          <link rel="stylesheet" href="/assets/css/style.css">
-          <style>body{{padding:2rem;max-width:900px;margin:auto}}article{{border-bottom:1px solid #ddd;padding:1rem 0}}h3{{margin:.2rem 0}}p{{color:#666}}</style>
-          </head><body><p><a href="/">← 回網站首頁</a></p><h1>{escape(title)}</h1><p>資料來源：Google 新聞公開 RSS</p>{rows}</body></html>'''
+          payload = json.dumps({"articles": all_articles}).encode("utf-8")
+          secret = os.environ["INGEST_SECRET"]
 
-          for title, slug, query in categories:
-              target = Path("tags") / slug / "index.html"
-              target.parent.mkdir(parents=True, exist_ok=True)
-              target.write_text(build_page(title, get_items(query)), encoding="utf-8")
+          req = Request(
+              "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest",
+              data=payload,
+              method="POST",
+              headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {secret}",
+              },
+          )
+          with urlopen(req, timeout=120) as resp:
+              print("回應:", resp.read().decode("utf-8"))
           PY
-
-      - name: Save changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tags/shi-shi/index.html tags/ke-ji-dong-tai/index.html tags/jiao-dian-xin-wen/index.html tags/jin-rong/index.html
-          git diff --cached --quiet || git commit -m "Update news pages"
-          git push
