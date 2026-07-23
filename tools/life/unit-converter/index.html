@@ -1,1 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生活常用單位換算小工具 - SY Horizon</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h1 { font-size: 24px; color: #111; margin-bottom: 10px; }
+        .instructions {
+            background: #e1f5fe;
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #01579b;
+            border: 1px solid #b3e5fc;
+        }
+        .instructions ol {
+            margin: 8px 0 0 20px;
+            padding: 0;
+            line-height: 1.6;
+        }
+        .card {
+            background: #fff;
+            padding: 20px;
+            border-radius: 6px;
+            border: 1px solid #e1e4e8;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .tab-btn {
+            background-color: #f1f8ff;
+            color: #0366d6;
+            border: 1px solid #c8e1ff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .tab-btn.active {
+            background-color: #0366d6;
+            color: white;
+            border-color: #0366d6;
+        }
+        .converter-section {
+            display: none;
+        }
+        .converter-section.active {
+            display: block;
+        }
+        .form-group {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        .form-group flex-1 {
+            flex: 1;
+        }
+        label { display: block; margin-bottom: 6px; font-weight: bold; font-size: 13px; color: #444; }
+        input[type="number"], select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .result-box {
+            background: #f6f8fa;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #e1e4e8;
+            font-size: 16px;
+            font-weight: bold;
+            color: #24292e;
+            margin-top: 15px;
+        }
+        
+        .download-area {
+            margin-top: 30px;
+            padding: 20px;
+            background: #fff;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .download-btn {
+            display: inline-block;
+            background-color: #2ea44f;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 15px;
+        }
+        .download-btn:hover { background-color: #2c974b; }
+        .download-desc {
+            font-size: 13px;
+            color: #586069;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
 
+    <h1>生活常用單位換算小工具</h1>
+    
+    <!-- 使用說明區塊 -->
+    <div class="instructions">
+        <strong>💡 使用說明：</strong>
+        <ol>
+            <li>點擊上方分頁切換您需要的換算類型（長度、重量、溫度、面積）。</li>
+            <li>在輸入框中填入數值，並選擇對應的單位。</li>
+            <li>系統將自動即時計算出轉換後的各項結果。</li>
+            <li>支援隨時點擊下方按鈕將此工具下載至本地，無需聯網隨時可用。</li>
+        </ol>
+    </div>
+
+    <div class="card">
+        <!-- 分頁按鈕 -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('length')">📏 長度換算</button>
+            <button class="tab-btn" onclick="switchTab('weight')">⚖️ 重量換算</button>
+            <button class="tab-btn" onclick="switchTab('temp')">🌡️ 溫度換算</button>
+            <button class="tab-btn" onclick="switchTab('area')">🟩 面積換算</button>
+        </div>
+
+        <!-- 1. 長度換算 -->
+        <div id="length-section" class="converter-section active">
+            <div class="form-group">
+                <div style="flex: 2;">
+                    <label>數值</label>
+                    <input type="number" id="len-val" value="1" oninput="convertLength()">
+                </div>
+                <div style="flex: 2;">
+                    <label>單位</label>
+                    <select id="len-unit" onchange="convertLength()">
+                        <option value="m">公尺 (m)</option>
+                        <option value="km">公里 (km)</option>
+                        <option value="cm">公分 (cm)</option>
+                        <option value="mm">公釐 (mm)</option>
+                        <option value="mile">英里 (mile)</option>
+                        <option value="inch">英吋 (inch)</option>
+                        <option value="ft">英尺 (ft)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="result-box" id="len-result">計算結果呈現處</div>
+        </div>
+
+        <!-- 2. 重量換算 -->
+        <div id="weight-section" class="converter-section">
+            <div class="form-group">
+                <div style="flex: 2;">
+                    <label>數值</label>
+                    <input type="number" id="wt-val" value="1" oninput="convertWeight()">
+                </div>
+                <div style="flex: 2;">
+                    <label>單位</label>
+                    <select id="wt-unit" onchange="convertWeight()">
+                        <option value="kg">公斤 (kg)</option>
+                        <option value="g">公克 (g)</option>
+                        <option value="mg">毫克 (mg)</option>
+                        <option value="jin">台斤</option>
+                        <option value="lb">磅 (lb)</option>
+                        <option value="oz">盎司 (oz)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="result-box" id="wt-result">計算結果呈現處</div>
+        </div>
+
+        <!-- 3. 溫度換算 -->
+        <div id="temp-section" class="converter-section">
+            <div class="form-group">
+                <div style="flex: 2;">
+                    <label>數值</label>
+                    <input type="number" id="temp-val" value="25" oninput="convertTemp()">
+                </div>
+                <div style="flex: 2;">
+                    <label>單位</label>
+                    <select id="temp-unit" onchange="convertTemp()">
+                        <option value="c">攝氏 (°C)</option>
+                        <option value="f">華氏 (°F)</option>
+                        <option value="k">凱氏 (K)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="result-box" id="temp-result">計算結果呈現處</div>
+        </div>
+
+        <!-- 4. 面積換算 -->
+        <div id="area-section" class="converter-section">
+            <div class="form-group">
+                <div style="flex: 2;">
+                    <label>數值</label>
+                    <input type="number" id="area-val" value="1" oninput="convertArea()">
+                </div>
+                <div style="flex: 2;">
+                    <label>單位</label>
+                    <select id="area-unit" onchange="convertArea()">
+                        <option value="m2">平方公尺 (m²)</option>
+                        <option value="ping">坪 (台坪)</option>
+                        <option value="mu">市畝 (畝)</option>
+                        <option value="hectare">公頃 (ha)</option>
+                        <option value="km2">平方公里 (km²)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="result-box" id="area-result">計算結果呈現處</div>
+        </div>
+    </div>
+
+    <!-- 供讀者下載的區塊 -->
+    <div class="download-area">
+        <a id="downloadLink" class="download-btn" download="生活常用單位換算小工具.html">📥 下載此工具到本地離線使用</a>
+        <p class="download-desc">點擊上方按鈕，即可將此工具完整下載到您的電腦中，無需聯網隨時可用。</p>
+    </div>
+
+    <script>
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.converter-section').forEach(sec => sec.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tabName + '-section').classList.add('active');
+
+            if(tabName === 'length') convertLength();
+            if(tabName === 'weight') convertWeight();
+            if(tabName === 'temp') convertTemp();
+            if(tabName === 'area') convertArea();
+        }
+
+        // 長度換算基準單位：公尺 (m)
+        function convertLength() {
+            const val = parseFloat(document.getElementById('len-val').value) || 0;
+            const unit = document.getElementById('len-unit').value;
+            let meters = val;
+
+            if (unit === 'km') meters = val * 1000;
+            else if (unit === 'cm') meters = val / 100;
+            else if (unit === 'mm') meters = val / 1000;
+            else if (unit === 'mile') meters = val * 1609.344;
+            else if (unit === 'inch') meters = val * 0.0254;
+            else if (unit === 'ft') meters = val * 0.3048;
+
+            document.getElementById('len-result').innerHTML = `
+                公尺: ${(meters).toFixed(4)} m<br>
+                公分: ${(meters * 100).toFixed(2)} cm<br>
+                公里: ${(meters / 1000).toFixed(4)} km<br>
+                英吋: ${(meters / 0.0254).toFixed(2)} inch<br>
+                英尺: ${(meters / 0.3048).toFixed(2)} ft
+            `;
+        }
+
+        // 重量換算基準單位：公克 (g)
+        function convertWeight() {
+            const val = parseFloat(document.getElementById('wt-val').value) || 0;
+            const unit = document.getElementById('wt-unit').value;
+            let grams = val;
+
+            if (unit === 'kg') grams = val * 1000;
+            else if (unit === 'mg') grams = val / 1000;
+            else if (unit === 'jin') grams = val * 600; // 台斤約600克
+            else if (unit === 'lb') grams = val * 453.59237;
+            else if (unit === 'oz') grams = val * 28.34952;
+
+            document.getElementById('wt-result').innerHTML = `
+                公克: ${(grams).toFixed(2)} g<br>
+                公斤: ${(grams / 1000).toFixed(4)} kg<br>
+                台斤: ${(grams / 600).toFixed(4)} 台斤<br>
+                磅 (lb): ${(grams / 453.59237).toFixed(4)} lb<br>
+                盎司 (oz): ${(grams / 28.34952).toFixed(2)} oz
+            `;
+        }
+
+        // 溫度換算
+        function convertTemp() {
+            const val = parseFloat(document.getElementById('temp-val').value) || 0;
+            const unit = document.getElementById('temp-unit').value;
+            let c = val, f = val, k = val;
+
+            if (unit === 'c') {
+                f = val * 9/5 + 32;
+                k = val + 273.15;
+            } else if (unit === 'f') {
+                c = (val - 32) * 5/9;
+                k = c + 273.15;
+            } else if (unit === 'k') {
+                c = val - 273.15;
+                f = c * 9/5 + 32;
+            }
+
+            document.getElementById('temp-result').innerHTML = `
+                攝氏 (°C): ${c.toFixed(2)} °C<br>
+                華氏 (°F): ${f.toFixed(2)} °F<br>
+                凱氏 (K): ${k.toFixed(2)} K
+            `;
+        }
+
+        // 面積換算基準單位：平方公尺 (m2)
+        function convertArea() {
+            const val = parseFloat(document.getElementById('area-val').value) || 0;
+            const unit = document.getElementById('area-unit').value;
+            let m2 = val;
+
+            if (unit === 'ping') m2 = val * 3.305785; // 1坪約 3.3058 平方公尺
+            else if (unit === 'mu') m2 = val * 666.666667; // 1畝約 666.67 平方公尺
+            else if (unit === 'hectare') m2 = val * 10000;
+            else if (unit === 'km2') m2 = val * 1000000;
+
+            document.getElementById('area-result').innerHTML = `
+                平方公尺: ${m2.toFixed(2)} m²<br>
+                坪 (台坪): ${(m2 / 3.305785).toFixed(2)} 坪<br>
+                市畝: ${(m2 / 666.666667).toFixed(4)} 畝<br>
+                公頃: ${(m2 / 10000).toFixed(4)} 公頃
+            `;
+        }
+
+        // 初始化執行
+        window.addEventListener('DOMContentLoaded', () => {
+            convertLength();
+            
+            // 自動打包下載邏輯
+            const htmlContent = document.documentElement.outerHTML;
+            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            document.getElementById('downloadLink').href = url;
+        });
+    </script>
+
+</body>
+</html>
