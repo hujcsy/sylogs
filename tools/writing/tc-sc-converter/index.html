@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>繁簡體中文線上轉換工具 - SY Horizon</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h1 { font-size: 24px; color: #111; margin-bottom: 10px; }
+        .instructions {
+            background: #e1f5fe;
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #01579b;
+            border: 1px solid #b3e5fc;
+        }
+        .instructions ol {
+            margin: 8px 0 0 20px;
+            padding: 0;
+            line-height: 1.6;
+        }
+        .editor-container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .pane {
+            flex: 1;
+            min-width: 320px;
+            display: flex;
+            flex-direction: column;
+        }
+        .pane label {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 6px;
+            color: #444;
+        }
+        textarea {
+            width: 100%;
+            height: 250px;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: monospace;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        button {
+            background-color: #2ea44f;
+            color: white;
+            padding: 10px 18px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover { background-color: #2c974b; }
+        button.secondary {
+            background-color: #6f42c1;
+        }
+        button.secondary:hover { background-color: #5a32a3; }
+        button.clear-btn {
+            background-color: #d73a49;
+        }
+        button.clear-btn:hover { background-color: #cb2431; }
+        .download-area {
+            margin-top: 30px;
+            padding: 20px;
+            background: #fff;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .download-btn {
+            display: inline-block;
+            background-color: #0366d6;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 15px;
+        }
+        .download-btn:hover { background-color: #0056b3; }
+        .download-desc {
+            font-size: 13px;
+            color: #586069;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>繁簡體中文線上轉換工具</h1>
+    
+    <!-- 使用說明區塊 -->
+    <div class="instructions">
+        <strong>💡 使用說明：</strong>
+        <ol>
+            <li>在左側文字框中貼上您需要轉換的中文文章或段落。</li>
+            <li>點擊「轉為簡體中文」或「轉為繁體中文」按鈕，右側將立即呈現轉換結果。</li>
+            <li>點擊「一鍵複製」可快速將轉換好的文字複製到剪貼簿中。</li>
+            <li>支援隨時點擊下方按鈕將此工具下載至本地離線使用。</li>
+        </ol>
+    </div>
+
+    <!-- 左右雙欄編輯區 -->
+    <div class="editor-container">
+        <div class="pane">
+            <label for="sourceText">原始文本</label>
+            <textarea id="sourceText" placeholder="請在此輸入或貼上要轉換的文字..."></textarea>
+        </div>
+        <div class="pane">
+            <label for="targetText">轉換結果</label>
+            <textarea id="targetText" placeholder="轉換後的文字將顯示在這裡..." readonly></textarea>
+        </div>
+    </div>
+
+    <!-- 功能操作按鈕 -->
+    <div class="btn-group">
+        <button onclick="convertToSimple()">轉為簡體中文 ↓</button>
+        <button class="secondary" onclick="convertToTraditional()">轉為繁體中文 ↓</button>
+        <button onclick="copyResult()">📋 複製結果</button>
+        <button class="clear-btn" onclick="clearAll()">清空內容</button>
+    </div>
+
+    <!-- 供讀者下載的區塊 -->
+    <div class="download-area">
+        <a id="downloadLink" class="download-btn" download="繁簡體中文轉換工具.html">📥 下載此工具到本地離線使用</a>
+        <p class="download-desc">點擊上方按鈕，即可將此工具完整下載到您的電腦中，無需聯網隨時可用。</p>
+    </div>
+
+    <script>
+        // 簡易內置繁簡字庫對應表（核心常用字與詞組）
+        const s2tDict = {
+            "优": "優", "体": "体", "儿": "兒", "关": "關", "写": "寫", "准": "準", "刘": "劉", "刚": "剛", "创": "創", "动": "動", "发": "發", "变": "變", "台": "臺", "后": "後", "听": "聽", "国": "國", "图": "圖", "圈": "圈", "坏": "壞", "坚": "堅", "处": "處", "备": "備", "复": "復", "头": "頭", "奖": "獎", "妈": "媽", "妇": "婦", "宝": "寶", "实": "實", "对": "對", "专": "專", "导": "導", "尔": "爾", "岁": "歲", "工业": "工業", "广": "廣", "庆": "慶", "当": "當", "录": "錄", "忆": "憶", "怀": "懷", "态": "態", "恒": "恆", "恶": "惡", "恼": "惱", "想": "想", "爱": "愛", "感谢": "感謝", "战": "戰", "所": "所", "才": "才", "执": "執", "扫": "掃", "扩": "擴", "旧": "舊", "时": "時", "晚": "晚", "晓": "曉", "来": "來", "标": "標", "样": "樣", "桥": "橋", "档": "檔", "桥": "橋", "欢": "歡", "段": "段", "母": "母", "气": "氣", "水": "水", "汉": "漢", "汤": "湯", "点": "點", "热": "熱", "爱": "愛", "现": "現", "环": "環", "产": "產", "电": "電", "畅": "暢", "界": "界", "发": "發", "确": "確", "码": "碼", "社": "社", "礼": "禮", "网": "網", "罗": "羅", "美": "美", "群": "群", "脑": "腦", "脏": "臟", "与": "與", "万": "萬", "叶": "葉", "藏": "藏", "号": "號", "见": "見", "观": "觀", "规": "規", "视": "視", "话": "話", "该": "該", "详": "詳", "语": "語", "谁": "誰", "调": "調", "负": "負", "财": "財", "质": "質", "购": "購", "转": "轉", "软": "軟", "轻": "輕", "适": "適", "选": "選", "递": "遞", "采": "採", "里": "裡", "重": "重", "长": "長", "门": "門", "问": "問", "间": "間", "阅": "閱", "随": "隨", "隐": "隱", "难": "難", "顶": "頂", "顺": "順", "饭": "飯", "饰": "飾", "馆": "館", "马": "馬", "驱": "驅", "验": "驗", "体": "體", "鸣": "鳴", "龄": "齡", "点": "點"
+        };
+
+        // 反轉生成簡體對應表
+        const t2sDict = {};
+        for (let s in s2tDict) {
+            t2sDict[s2tDict[s]] = s;
+        }
+
+        function translateText(text, dict) {
+            let result = "";
+            for (let i = 0; i < text.length; i++) {
+                let char = text[i];
+                result += dict[char] || char;
+            }
+            return result;
+        }
+
+        function convertToTraditional() {
+            const text = document.getElementById('sourceText').value;
+            document.getElementById('targetText').value = translateText(text, s2tDict);
+        }
+
+        function convertToSimple() {
+            const text = document.getElementById('sourceText').value;
+            document.getElementById('targetText').value = translateText(text, t2sDict);
+        }
+
+        function copyResult() {
+            const target = document.getElementById('targetText');
+            if (!target.value) {
+                alert('沒有可複製的內容！');
+                return;
+            }
+            target.select();
+            document.execCommand('copy');
+            alert('已成功複製轉換結果到剪貼簿！');
+        }
+
+        function clearAll() {
+            document.getElementById('sourceText').value = '';
+            document.getElementById('targetText').value = '';
+        }
+
+        // 自動將當前頁面的完整程式碼打包成 Blob，實現點擊即下載
+        window.addEventListener('DOMContentLoaded', () => {
+            const htmlContent = document.documentElement.outerHTML;
+            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            document.getElementById('downloadLink').href = url;
+        });
+    </script>
+
+</body>
+</html>
