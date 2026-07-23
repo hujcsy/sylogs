@@ -13,7 +13,21 @@
             background-color: #f9f9f9;
             color: #333;
         }
-        h1 { font-size: 24px; color: #111; }
+        h1 { font-size: 24px; color: #111; margin-bottom: 10px; }
+        .instructions {
+            background: #e1f5fe;
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #01579b;
+            border: 1px solid #b3e5fc;
+        }
+        .instructions ol {
+            margin: 8px 0 0 20px;
+            padding: 0;
+            line-height: 1.6;
+        }
         textarea {
             width: 100%;
             height: 250px;
@@ -75,8 +89,18 @@
 <body>
 
     <h1>Markdown 文本字數與閱讀時間統計器</h1>
-    <p>在此貼上您的文章內容，系統將自動計算字數與預估閱讀時間：</p>
     
+    <!-- 使用說明區塊 -->
+    <div class="instructions">
+        <strong>💡 使用說明：</strong>
+        <ol>
+            <li>在下方文字框中直接貼上您的 Markdown 或一般文章內容。</li>
+            <li>系統會即時自動計算**總字數（含標點）**與**純中文字數**。</li>
+            <li>根據中文字數（以每分鐘約 400 字計算），自動評估出預估閱讀時間。</li>
+            <li>點擊下方按鈕可隨時下載離線版本，方便隨時隨地使用。</li>
+        </ol>
+    </div>
+
     <textarea id="textInput" placeholder="在此輸入或貼上文字..." oninput="calculateStats()"></textarea>
 
     <div class="stats-box">
