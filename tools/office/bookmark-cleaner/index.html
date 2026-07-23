@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>網址收藏夾一鍵清理與管理工具 - SY Horizon</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h1 { font-size: 24px; color: #111; margin-bottom: 10px; }
+        .instructions {
+            background: #e1f5fe;
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #01579b;
+            border: 1px solid #b3e5fc;
+        }
+        .instructions ol {
+            margin: 8px 0 0 20px;
+            padding: 0;
+            line-height: 1.6;
+        }
+        .card {
+            background: #fff;
+            padding: 20px;
+            border-radius: 6px;
+            border: 1px solid #e1e4e8;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        input[type="file"] {
+            margin-bottom: 15px;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        button {
+            background-color: #2ea44f;
+            color: white;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover { background-color: #2c974b; }
+        button.danger { background-color: #d73a49; }
+        button.danger:hover { background-color: #cb2431; }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            border: 1px solid #e1e4e8;
+            padding: 10px;
+            text-align: left;
+            font-size: 13px;
+        }
+        th { background-color: #f6f8fa; }
+        .status-text {
+            font-weight: bold;
+            color: #586069;
+            margin-bottom: 10px;
+        }
+        
+        .download-area {
+            margin-top: 30px;
+            padding: 20px;
+            background: #fff;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .download-btn {
+            display: inline-block;
+            background-color: #0366d6;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 15px;
+        }
+        .download-btn:hover { background-color: #0056b3; }
+        .download-desc {
+            font-size: 13px;
+            color: #586069;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>網址收藏夾一鍵清理與管理工具</h1>
+    
+    <!-- 使用說明區塊 -->
+    <div class="instructions">
+        <strong>💡 使用說明（因瀏覽器安全限制，需透過匯出檔案清理）：</strong>
+        <ol>
+            <li>在您的瀏覽器（Chrome/Edge 等）設定中點擊<strong>「匯出書籤」</strong>，會得到一個 `.html` 檔案。</li>
+            <li>點擊下方按鈕上傳該書籤檔案，系統將自動解析出所有收藏的網址。</li>
+            <li>勾選您想要刪除的網址，或點擊「批次刪除選中項目」。</li>
+            <li>點擊「導出清理後的書籤檔案」，再將新檔案匯入回瀏覽器即可完成大掃除！</li>
+            <li>支援隨時點擊頁面最下方按鈕將此工具下載至本地離線使用。</li>
+        </ol>
+    </div>
+
+    <!-- 上傳與操作面板 -->
+    <div class="card">
+        <label for="bookmarkFile" style="font-weight: bold; display: block; margin-bottom: 8px;">1. 上傳您的瀏覽器書籤 HTML 檔案：</label>
+        <input type="file" id="bookmarkFile" accept=".html,.htm" onchange="loadBookmarks(event)">
+        
+        <div id="actionPanel" style="display: none;">
+            <div class="status-text" id="statusText">已載入 0 個書籤</div>
+            <div class="btn-group">
+                <button onclick="selectAll(true)">全選</button>
+                <button onclick="selectAll(false)">取消全選</button>
+                <button class="danger" onclick="deleteSelected()">🗑️ 刪除勾選的網址</button>
+                <button style="background-color: #0366d6;" onclick="exportBookmarks()">📥 導出清理後的書籤檔案</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 列表展示區 -->
+    <div class="card" id="listCard" style="display: none;">
+        <label style="font-weight: bold; margin-bottom: 10px; display: block;">2. 書籤清單預覽與勾選刪除</label>
+        <div style="max-height: 400px; overflow-y: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 8%; text-align: center;">選擇</th>
+                        <th style="width: 35%;">書籤標題</th>
+                        <th style="width: 57%;">網址 (URL)</th>
+                    </tr>
+                </thead>
+                <tbody id="bookmarkTableBody">
+                    <!-- 動態載入 -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 供讀者下載的區塊 -->
+    <div class="download-area">
+        <a id="downloadLink" class="download-btn" download="網址收藏夾清理工具.html">📥 下載此工具到本地離線使用</a>
+        <p class="download-desc">點擊上方按鈕，即可將此工具完整下載到您的電腦中，無需聯網隨時可用。</p>
+    </div>
+
+    <script>
+        let bookmarks = [];
+
+        function loadBookmarks(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const htmlContent = e.target.result;
+                parseBookmarksHtml(htmlContent);
+            };
+            reader.readAsText(file);
+        }
+
+        function parseBookmarksHtml(html) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const links = doc.querySelectorAll('a');
+            
+            bookmarks = [];
+            links.forEach((a, index) => {
+                bookmarks.push({
+                    id: index,
+                    title: a.textContent || '未命名書籤',
+                    url: a.href,
+                    selected: false
+                });
+            });
+
+            renderTable();
+            document.getElementById('actionPanel').style.display = 'block';
+            document.getElementById('listCard').style.display = 'block';
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('bookmarkTableBody');
+            tbody.innerHTML = '';
+            
+            document.getElementById('statusTextinnerText', '已載入 ' + bookmarks.length + ' 個書籤');
+            document.getElementById('statusText').innerText = `目前共有 ${bookmarks.length} 個書籤`;
+
+            if (bookmarks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #777;">沒有找到任何書籤紀錄</td></tr>';
+                return;
+            }
+
+            bookmarks.forEach((bm, index) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="text-align: center;"><input type="checkbox" ${bm.selected ? 'checked' : ''} onchange="toggleSelect(${index})"></td>
+                    <td><strong>${escapeHtml(bm.title)}</strong></td>
+                    <td><a href="${bm.url}" target="_blank" style="color: #0366d6; text-decoration: none; word-break: break-all;">${bm.url}</a></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function toggleSelect(index) {
+            bookmarks[index].selected = !bookmarks[index].selected;
+        }
+
+        function selectAll(select) {
+            bookmarks.forEach(bm => bm.selected = select);
+            renderTable();
+        }
+
+        function deleteSelected() {
+            const initialCount = bookmarks.length;
+            bookmarks = bookmarks.filter(bm => !bm.selected);
+            const deletedCount = initialCount - bookmarks.length;
+            
+            if (deletedCount === 0) {
+                alert('請先勾選要刪除的書籤項目！');
+                return;
+            }
+            
+            alert(`成功刪除 ${deletedCount} 個書籤！`);
+            renderTable();
+        }
+
+        function exportBookmarks() {
+            let html = `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n`;
+            
+            bookmarks.forEach(bm => {
+                html += `    <DT><A HREF="${bm.url}">${escapeHtml(bm.title)}</A>\n`;
+            });
+            
+            html += `</DL><p>`;
+
+            const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'cleaned_bookmarks.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        // 自動將當前頁面的完整程式碼打包成 Blob，實現點擊即下載
+        window.addEventListener('DOMContentLoaded', () => {
+            const htmlContent = document.documentElement.outerHTML;
+            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const downloadLink = document.getElementById('downloadLink');
+            downloadLink.href = url;
+        });
+    </script>
+
+</body>
+</html>
