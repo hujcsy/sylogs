@@ -26,7 +26,7 @@
         .instructions ol {
             margin: 8px 0 0 20px;
             padding: 0;
-            line-height: 1.6;
+            line-height: 1.8;
         }
         .card {
             background: #fff;
@@ -112,7 +112,7 @@
     <div class="instructions">
         <strong>💡 使用說明（因瀏覽器安全限制，需透過匯出檔案清理）：</strong>
         <ol>
-            <li>在您的瀏覽器（Chrome/Edge 等）設定中點擊<strong>「匯出書籤」</strong>，會得到一個 `.html` 檔案。</li>
+            <li><strong>如何匯出書籤：</strong>請在瀏覽器中按下快捷鍵 <code style="background:#fff; padding:2px 6px; border:1px solid #b3e5fc; border-radius:3px;">Ctrl + Shift + O</code>（或在網址列輸入 <code style="background:#fff; padding:2px 6px; border:1px solid #b3e5fc; border-radius:3px;">chrome://bookmarks</code>），進入書籤管理頁面後，點擊右上角<strong>三個點 (⋮)</strong> 選擇<strong>「匯出書籤」</strong>，即可得到一個 `.html` 檔案。</li>
             <li>點擊下方按鈕上傳該書籤檔案，系統將自動解析出所有收藏的網址。</li>
             <li>勾選您想要刪除的網址，或點擊「批次刪除選中項目」。</li>
             <li>點擊「導出清理後的書籤檔案」，再將新檔案匯入回瀏覽器即可完成大掃除！</li>
@@ -200,7 +200,6 @@
             const tbody = document.getElementById('bookmarkTableBody');
             tbody.innerHTML = '';
             
-            document.getElementById('statusTextinnerText', '已載入 ' + bookmarks.length + ' 個書籤');
             document.getElementById('statusText').innerText = `目前共有 ${bookmarks.length} 個書籤`;
 
             if (bookmarks.length === 0) {
@@ -256,6 +255,7 @@
             const a = document.createElement('a');
             a.href = url;
             a.download = 'cleaned_bookmarks.html';
+            document.write('<a href="'+url+'">下載</a>');
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -266,7 +266,6 @@
             return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }
 
-        // 自動將當前頁面的完整程式碼打包成 Blob，實現點擊即下載
         window.addEventListener('DOMContentLoaded', () => {
             const htmlContent = document.documentElement.outerHTML;
             const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
