@@ -3,13 +3,15 @@ on:
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
+
 jobs:
   fetch-and-send:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch RSS and POST to Cloudflare Worker
+      - name: Fetch RSS, AI Optimize and POST to Cloudflare Worker
         env:
           INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
         run: |
           python - <<'PY'
           import json
@@ -17,42 +19,90 @@ jobs:
           from urllib.parse import urlencode
           from urllib.request import Request, urlopen
           import xml.etree.ElementTree as ET
+
           categories = [
               ("時事", "國際 OR 世界"),
               ("科技動態", "科技"),
               ("焦點新聞", "熱門新聞"),
               ("金融", "金融 OR 財經"),
           ]
+
+          def ai_optimize_article(title):
+              api_key = os.environ.get("TOGETHER_API_KEY")
+              if not api_key:
+                  return title, ""
+              
+              url = "https://together.xyz"
+              headers = {
+                  "Authorization": f"Bearer {api_key}",
+                  "Content-Type": "application/json"
+              }
+              payload = json.dumps({
+                  "model": "deepseek-ai/DeepSeek-V4-Flash",
+                  "messages": [
+                      {
+                          "role": "system",
+                          "content": "你是一個專業的新聞網站主編。請根據提供的新聞原始標題，完成兩件事：1. 去除標題末尾的媒體後綴（如 - 自由時報、| 聯合新聞網等），使其更乾淨。2. 圍繞該標題的主題，生成一段100字以內、吸引人的中文核心背景摘要。請嚴格以 JSON 格式回覆，格式為: {\"clean_title\": \"...\", \"summary\": \"...\"}"
+                      },
+                      {
+                          "role": "user",
+                          "content": f"原始新聞標題: {title}"
+                      }
+                  ],
+                  "response_format": {"type": "json_object"}
+              }).encode("utf-8")
+
+              try:
+                  req = Request(url, data=payload, method="POST", headers=headers)
+                  with urlopen(req, timeout=15) as response:
+                      res_data = json.loads(response.read().decode("utf-8"))
+                      ai_res = json.loads(res_data['choices']['message']['content'])
+                      return ai_res.get("clean_title", title), ai_res.get("summary", "")
+              except Exception as e:
+                  print(f"AI 優化失敗 ({title[:10]}...): {e}")
+                  return title, ""
+
           def get_items(query):
-              url = "https://news.google.com/rss/search?" + urlencode({
-                  "q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"
+              url = "https://google.com?" + urlencode({
+                  "q": query,
+                  "hl": "zh-TW",
+                  "gl": "TW",
+                  "ceid": "TW:zh-Hant"
               })
               req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
               with urlopen(req, timeout=30) as response:
                   root = ET.fromstring(response.read())
               items = []
-              for item in root.findall("./channel/item")[:15]:
+              for item in root.findall("./channel/item")[:8]:
                   title = (item.findtext("title") or "").strip()
                   link = (item.findtext("link") or "").strip()
-                  source = item.find("source")
-                  source = source.text.strip() if source is not None and source.text else "Google 新聞"
+                  source_el = item.find("source")
+                  source = "Google 新聞"
+                  if source_el is not None and source_el.text:
+                      source = source_el.text.strip()
                   if title and link:
                       items.append({"title": title, "link": link, "source": source})
               return items
+
           all_articles = []
           for cat_name, query in categories:
               try:
                   items = get_items(query)
                   for it in items:
                       it["category"] = cat_name
+                      print(f"正在使用 DeepSeek 優化: {it['title'][:15]}...")
+                      clean_title, summary = ai_optimize_article(it["title"])
+                      it["title"] = clean_title
+                      it["summary"] = summary
                       all_articles.append(it)
-                  print(f"{cat_name}: 抓到 {len(items)} 筆")
+                  print(f"{cat_name}: 抓到並優化 {len(items)} 筆")
               except Exception as e:
                   print(f"{cat_name} 抓取失敗: {e}")
+
           payload = json.dumps({"articles": all_articles}).encode("utf-8")
           secret = os.environ["INGEST_SECRET"]
           req = Request(
-              "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest",
+              "https://workers.dev",
               data=payload,
               method="POST",
               headers={
