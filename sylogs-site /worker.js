@@ -83,11 +83,15 @@ async function getOrTranslate(env, contentType, contentId, lang, field, original
     translated = await translateChunk(env, lang, originalText, 6000, sourceLang);
   }
 
-  if (!translated) return originalText;
-
-  await env.DB.prepare(
-    "INSERT OR IGNORE INTO translations (content_type, content_id, lang, field, translated_text) VALUES (?, ?, ?, ?, ?)"
-  ).bind(contentType, contentId, lang, field, translated).run();
+ if (env && env.DB) {
+    try {
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO translations (content_type, content_id, lang, field, translated_text) VALUES (?, ?, ?, ?, ?)"
+      ).bind(contentType, contentId, lang, field, translated).run();
+    } catch (e) {
+      // 捕獲異常，防止頁面崩掉
+    }
+  }
 
   return translated;
 }
