@@ -1,4 +1,4 @@
-name: Fetch news and send to Cloudflare D1
+name: 獲取新聞並發送至 Cloudflare D1
 on:
   schedule:
     - cron: "17 */6 * * *"
@@ -31,8 +31,8 @@ jobs:
               api_key = os.environ.get("TOGETHER_API_KEY")
               if not api_key:
                   return title, ""
-              
-              url = "https://together.xyz"
+
+              url = "https://api.together.xyz/v1/chat/completions"
               headers = {
                   "Authorization": f"Bearer {api_key}",
                   "Content-Type": "application/json"
@@ -42,7 +42,7 @@ jobs:
                   "messages": [
                       {
                           "role": "system",
-                          "content": "你是一個專業的新聞網站主編。請根據提供的新聞原始標題，完成兩件事：1. 去除標題末尾的媒體後綴（如 - 自由時報、| 聯合新聞網等），使其更乾淨。2. 圍繞該標題的主題，生成一段100字以內、吸引人的中文核心背景摘要。請嚴格以 JSON 格式回覆，格式為: {\"clean_title\": \"...\", \"summary\": \"...\"}"
+                          "content": "你是一個專業的新聞網站主編。請根據提供的新聞原始標題，完成兩件事：1. 潤飾標題；2. 撰寫摘要。請嚴格返回 JSON 格式：{\"title\": \"...\", \"summary\": \"...\"}"
                       },
                       {
                           "role": "user",
@@ -53,17 +53,18 @@ jobs:
               }).encode("utf-8")
 
               try:
-                  req = Request(url, data=payload, method="POST", headers=headers)
-                  with urlopen(req, timeout=15) as response:
-                      res_data = json.loads(response.read().decode("utf-8"))
-                      ai_res = json.loads(res_data['choices']['message']['content'])
-                      return ai_res.get("clean_title", title), ai_res.get("summary", "")
+                  req = Request(url, data=payload, headers=headers, method="POST")
+                  with urlopen(req, timeout=30) as resp:
+                      res_json = json.loads(resp.read().decode("utf-8"))
+                      content = res_json['choices'][0]['message']['content']
+                      data = json.loads(content)
+                      return data.get("title", title), data.get("summary", "")
               except Exception as e:
                   print(f"AI 優化失敗 ({title[:10]}...): {e}")
                   return title, ""
 
           def get_items(query):
-              url = "https://google.com?" + urlencode({
+              url = "https://news.google.com/rss/search?" + urlencode({
                   "q": query,
                   "hl": "zh-TW",
                   "gl": "TW",
@@ -72,37 +73,32 @@ jobs:
               req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
               with urlopen(req, timeout=30) as response:
                   root = ET.fromstring(response.read())
-              items = []
-              for item in root.findall("./channel/item")[:8]:
-                  title = (item.findtext("title") or "").strip()
-                  link = (item.findtext("link") or "").strip()
-                  source_el = item.find("source")
-                  source = "Google 新聞"
-                  if source_el is not None and source_el.text:
-                      source = source_el.text.strip()
-                  if title and link:
-                      items.append({"title": title, "link": link, "source": source})
-              return items
+                  items = []
+                  for item in root.findall("./channel/item")[:8]:
+                      title = (item.findtext("title") or "").strip()
+                      link = (item.findtext("link") or "").strip()
+                      source_el = item.find("source")
+                      source = source_el.text.strip() if source_el is not None and source_el.text else ""
+                      if title and link:
+                          opt_title, summary = ai_optimize_article(title)
+                          items.append({
+                              "title": opt_title,
+                              "link": link,
+                              "source": source,
+                              "summary": summary
+                          })
+                  return items
 
-          all_articles = []
+          all_news = {}
           for cat_name, query in categories:
-              try:
-                  items = get_items(query)
-                  for it in items:
-                      it["category"] = cat_name
-                      print(f"正在使用 DeepSeek 優化: {it['title'][:15]}...")
-                      clean_title, summary = ai_optimize_article(it["title"])
-                      it["title"] = clean_title
-                      it["summary"] = summary
-                      all_articles.append(it)
-                  print(f"{cat_name}: 抓到並優化 {len(items)} 筆")
-              except Exception as e:
-                  print(f"{cat_name} 抓取失敗: {e}")
+              all_news[cat_name] = get_items(query)
 
-          payload = json.dumps({"articles": all_articles}).encode("utf-8")
-          secret = os.environ["INGEST_SECRET"]
+          worker_url = "https://syslogs-news-ingest.sylogs.workers.dev"
+          secret = os.environ.get("INGEST_SECRET")
+
+          payload = json.dumps(all_news).encode("utf-8")
           req = Request(
-              "https://workers.dev",
+              worker_url,
               data=payload,
               method="POST",
               headers={
