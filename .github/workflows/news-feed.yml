@@ -8,10 +8,9 @@ jobs:
   fetch-and-send:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch RSS, AI Optimize and POST to Cloudflare Worker
+      - name: Fetch RSS and POST to Cloudflare Worker
         env:
           INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
-          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
         run: |
           python - <<'PY'
           import json
@@ -28,50 +27,13 @@ jobs:
               ("金融", "金融 OR 財經"),
           ]
 
-          def ai_optimize_article(title):
-              api_key = os.environ.get("TOGETHER_API_KEY")
-              if not api_key or len(api_key.strip()) < 10:
-                  return title, ""
-
-              url = "https://api.together.ai/v1/chat/completions"
-              headers = {
-                  "Authorization": f"Bearer {api_key.strip()}",
-                  "Content-Type": "application/json",
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-              }
-              payload = json.dumps({
-                  "model": "deepseek-ai/DeepSeek-V3",
-                  "messages": [
-                      {
-                          "role": "system",
-                          "content": "你是一個專業的新聞網站主編。請根據提供的新聞原始標題，完成兩件事：1. 潤飾標題；2. 撰寫摘要。請嚴格返回 JSON 格式：{\"title\": \"...\", \"summary\": \"...\"}"
-                      },
-                      {
-                          "role": "user",
-                          "content": f"原始新聞標題: {title}"
-                      }
-                  ],
-                  "response_format": {"type": "json_object"}
-              }).encode("utf-8")
-
-              try:
-                  req = Request(url, data=payload, headers=headers, method="POST")
-                  with urlopen(req, timeout=15) as resp:
-                      res_json = json.loads(resp.read().decode("utf-8"))
-                      content = res_json['choices'][0]['message']['content']
-                      data = json.loads(content)
-                      return data.get("title", title), data.get("summary", "")
-              except Exception as e:
-                  print(f"AI 優化失敗 ({title[:10]}...): {e}")
-                  return title, ""
-
           def get_items(cat_name, query):
               urls = [
                   "https://news.google.com/rss/search?" + urlencode({"q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"}),
                   "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"})
               ]
               headers = {
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
               }
 
@@ -89,14 +51,13 @@ jobs:
                               title = (item.findtext("title") or "").strip()
                               link = (item.findtext("link") or "").strip()
                               source_el = item.find("source")
-                              source = source_el.text.strip() if source_el is not None and source_el.text else "網路新聞"
+                              source = source_el.text.strip() if source_el is not None and source_el.text else "網絡新聞"
                               if title and link:
-                                  opt_title, summary = ai_optimize_article(title)
                                   items.append({
-                                      "title": opt_title,
+                                      "title": title,
                                       "link": link,
                                       "source": source,
-                                      "summary": summary
+                                      "category": cat_name
                                   })
                           if items:
                               return items
@@ -104,15 +65,15 @@ jobs:
                       continue
               return []
 
-          all_news = {}
+          all_articles = []
           for cat_name, query in categories:
-              all_news[cat_name] = get_items(cat_name, query)
+              all_articles.extend(get_items(cat_name, query))
               time.sleep(1)
 
-          # 填入已確認的 Cloudflare Worker 正確網址
-          worker_url = "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev"
+          worker_url = "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest"
           secret = os.environ.get("INGEST_SECRET")
-          payload = json.dumps(all_news).encode("utf-8")
+          
+          payload = json.dumps({"articles": all_articles}).encode("utf-8")
 
           req = Request(
               worker_url,
