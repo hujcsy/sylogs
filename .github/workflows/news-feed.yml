@@ -109,31 +109,25 @@ jobs:
               all_news[cat_name] = get_items(cat_name, query)
               time.sleep(1)
 
-          # 測試正確的 Worker 網址（排除多餘的 sys 前綴）
-          worker_urls = [
-              "https://news-ingest.sylogs.workers.dev/api/news",
-              "https://syslogs-news-ingest.sylogs.workers.dev/api/news",
-              "https://sylogs.com/api/news"
-          ]
+          # 填入已確認的 Cloudflare Worker 正確網址
+          worker_url = "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev"
           secret = os.environ.get("INGEST_SECRET")
           payload = json.dumps(all_news).encode("utf-8")
 
-          for worker_url in worker_urls:
-              req = Request(
-                  worker_url,
-                  data=payload,
-                  method="POST",
-                  headers={
-                      "Content-Type": "application/json",
-                      "Authorization": f"Bearer {secret}",
-                      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                  },
-              )
-              try:
-                  with urlopen(req, timeout=30) as resp:
-                      res_text = resp.read().decode("utf-8")
-                      print(f"發送成功 [{worker_url}]:", res_text)
-                      break
-              except Exception as e:
-                  print(f"嘗試 [{worker_url}] 失敗: {e}")
+          req = Request(
+              worker_url,
+              data=payload,
+              method="POST",
+              headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {secret}",
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+              },
+          )
+          try:
+              with urlopen(req, timeout=30) as resp:
+                  res_text = resp.read().decode("utf-8")
+                  print(f"發送成功 [{worker_url}]:", res_text)
+          except Exception as e:
+              print(f"發送失敗: {e}")
           PY
