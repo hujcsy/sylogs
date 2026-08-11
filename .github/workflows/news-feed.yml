@@ -35,10 +35,11 @@ jobs:
               url = "https://api.together.xyz/v1/chat/completions"
               headers = {
                   "Authorization": f"Bearer {api_key}",
-                  "Content-Type": "application/json"
+                  "Content-Type": "application/json",
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
               }
               payload = json.dumps({
-                  "model": "deepseek-ai/DeepSeek-V4-Flash",
+                  "model": "deepseek-ai/DeepSeek-V3",
                   "messages": [
                       {
                           "role": "system",
@@ -63,35 +64,48 @@ jobs:
                   print(f"AI 優化失敗 ({title[:10]}...): {e}")
                   return title, ""
 
-          def get_items(query):
+          def get_items(cat_name, query):
               url = "https://news.google.com/rss/search?" + urlencode({
                   "q": query,
                   "hl": "zh-TW",
                   "gl": "TW",
                   "ceid": "TW:zh-Hant"
               })
-              req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-              with urlopen(req, timeout=30) as response:
-                  root = ET.fromstring(response.read())
-                  items = []
-                  for item in root.findall("./channel/item")[:8]:
-                      title = (item.findtext("title") or "").strip()
-                      link = (item.findtext("link") or "").strip()
-                      source_el = item.find("source")
-                      source = source_el.text.strip() if source_el is not None and source_el.text else ""
-                      if title and link:
-                          opt_title, summary = ai_optimize_article(title)
-                          items.append({
-                              "title": opt_title,
-                              "link": link,
-                              "source": source,
-                              "summary": summary
-                          })
-                  return items
+              # 加上真正的 Browser User-Agent 避免 Google 返回 403/HTML
+              req = Request(url, headers={
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+              })
+              try:
+                  with urlopen(req, timeout=30) as response:
+                      content = response.read()
+                      # 檢查是否拿到 HTML 避開 syntax error
+                      if content.strip().startswith(b"<!DOCTYPE") or content.strip().startswith(b"<html"):
+                          print(f"[{cat_name}] 抓取失敗: 收到 HTML 網頁而非 RSS XML")
+                          return []
+                      
+                      root = ET.fromstring(content)
+                      items = []
+                      for item in root.findall("./channel/item")[:8]:
+                          title = (item.findtext("title") or "").strip()
+                          link = (item.findtext("link") or "").strip()
+                          source_el = item.find("source")
+                          source = source_el.text.strip() if source_el is not None and source_el.text else ""
+                          if title and link:
+                              opt_title, summary = ai_optimize_article(title)
+                              items.append({
+                                  "title": opt_title,
+                                  "link": link,
+                                  "source": source,
+                                  "summary": summary
+                              })
+                      return items
+              except Exception as e:
+                  print(f"[{cat_name}] 抓取失敗: {e}")
+                  return []
 
           all_news = {}
           for cat_name, query in categories:
-              all_news[cat_name] = get_items(query)
+              all_news[cat_name] = get_items(cat_name, query)
 
           worker_url = "https://syslogs-news-ingest.sylogs.workers.dev"
           secret = os.environ.get("INGEST_SECRET")
@@ -104,9 +118,13 @@ jobs:
               headers={
                   "Content-Type": "application/json",
                   "Authorization": f"Bearer {secret}",
-                  "User-Agent": "Mozilla/5.0 (compatible; sylogs-bot/1.0)",
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
               },
           )
-          with urlopen(req, timeout=120) as resp:
-              print("回應:", resp.read().decode("utf-8"))
+          try:
+              with urlopen(req, timeout=120) as resp:
+                  res_text = resp.read().decode("utf-8")
+                  print("回應:", res_text)
+          except Exception as e:
+              print(f"發送至 Worker 失敗: {e}")
           PY
