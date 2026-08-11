@@ -16,6 +16,7 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import time
           from urllib.parse import urlencode
           from urllib.request import Request, urlopen
           import xml.etree.ElementTree as ET
@@ -32,7 +33,6 @@ jobs:
               if not api_key:
                   return title, ""
 
-              # 已修正為 Together AI 官方最新標準 API 網址 (.ai)
               url = "https://api.together.ai/v1/chat/completions"
               headers = {
                   "Authorization": f"Bearer {api_key}",
@@ -66,47 +66,54 @@ jobs:
                   return title, ""
 
           def get_items(cat_name, query):
-              url = "https://news.google.com/rss/search?" + urlencode({
-                  "q": query,
-                  "hl": "zh-TW",
-                  "gl": "TW",
-                  "ceid": "TW:zh-Hant"
-              })
-              req = Request(url, headers={
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-              })
-              try:
-                  with urlopen(req, timeout=30) as response:
-                      content = response.read()
-                      if content.strip().startswith(b"<!DOCTYPE") or content.strip().startswith(b"<html"):
-                          print(f"[{cat_name}] 抓取失敗: 收到 HTML 網頁而非 RSS XML")
-                          return []
-                      
-                      root = ET.fromstring(content)
-                      items = []
-                      for item in root.findall("./channel/item")[:8]:
-                          title = (item.findtext("title") or "").strip()
-                          link = (item.findtext("link") or "").strip()
-                          source_el = item.find("source")
-                          source = source_el.text.strip() if source_el is not None and source_el.text else ""
-                          if title and link:
-                              opt_title, summary = ai_optimize_article(title)
-                              items.append({
-                                  "title": opt_title,
-                                  "link": link,
-                                  "source": source,
-                                  "summary": summary
-                              })
-                      return items
-              except Exception as e:
-                  print(f"[{cat_name}] 抓取失敗: {e}")
-                  return []
+              # 使用自由且無反爬限制的 RSS Hub / Bing 備用源，若 Google 失敗則自動降級
+              urls = [
+                  "https://news.google.com/rss/search?" + urlencode({"q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"}),
+                  "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"})
+              ]
+              
+              headers = {
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+              }
+
+              for url in urls:
+                  try:
+                      req = Request(url, headers=headers)
+                      with urlopen(req, timeout=15) as response:
+                          content = response.read()
+                          if content.strip().startswith(b"<!DOCTYPE") or content.strip().startswith(b"<html"):
+                              continue
+                          
+                          root = ET.fromstring(content)
+                          items = []
+                          for item in root.findall("./channel/item")[:8]:
+                              title = (item.findtext("title") or "").strip()
+                              link = (item.findtext("link") or "").strip()
+                              source_el = item.find("source")
+                              source = source_el.text.strip() if source_el is not None and source_el.text else "網絡新聞"
+                              if title and link:
+                                  opt_title, summary = ai_optimize_article(title)
+                                  items.append({
+                                      "title": opt_title,
+                                      "link": link,
+                                      "source": source,
+                                      "summary": summary
+                                  })
+                          if items:
+                              return items
+                  except Exception as e:
+                      continue
+              print(f"[{cat_name}] 抓取失敗: 找不到有效 RSS 來源")
+              return []
 
           all_news = {}
           for cat_name, query in categories:
               all_news[cat_name] = get_items(cat_name, query)
+              time.sleep(1)
 
-          worker_url = "https://syslogs-news-ingest.sylogs.workers.dev"
+          # 指向 Worker 的 API 端點
+          worker_url = "https://syslogs-news-ingest.sylogs.workers.dev/api/news"
           secret = os.environ.get("INGEST_SECRET")
 
           payload = json.dumps(all_news).encode("utf-8")
