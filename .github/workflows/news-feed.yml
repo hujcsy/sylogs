@@ -32,7 +32,8 @@ jobs:
               if not api_key:
                   return title, ""
 
-              url = "https://api.together.xyz/v1/chat/completions"
+              # 已修正為 Together AI 官方最新標準 API 網址 (.ai)
+              url = "https://api.together.ai/v1/chat/completions"
               headers = {
                   "Authorization": f"Bearer {api_key}",
                   "Content-Type": "application/json",
@@ -71,14 +72,12 @@ jobs:
                   "gl": "TW",
                   "ceid": "TW:zh-Hant"
               })
-              # 加上真正的 Browser User-Agent 避免 Google 返回 403/HTML
               req = Request(url, headers={
                   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
               })
               try:
                   with urlopen(req, timeout=30) as response:
                       content = response.read()
-                      # 檢查是否拿到 HTML 避開 syntax error
                       if content.strip().startswith(b"<!DOCTYPE") or content.strip().startswith(b"<html"):
                           print(f"[{cat_name}] 抓取失敗: 收到 HTML 網頁而非 RSS XML")
                           return []
