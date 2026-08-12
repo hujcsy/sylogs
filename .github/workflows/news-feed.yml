@@ -79,13 +79,12 @@ jobs:
           worker_url = "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest"
           secret = os.environ.get("INGEST_SECRET", "").strip()
 
-          # 如果 Secret 带空格或格式不妥，进行提示
           if not secret:
-              print("❌ 错误：GitHub Secret [INGEST_SECRET] 为空，请检查仓库 Settings 设置！")
+              print("❌ 错误：GitHub Secret [INGEST_SECRET] 为空！")
               sys.exit(1)
 
-          # 标准化 Authorization Header（自动识别是否需要加 Bearer）
-          auth_header = secret if secret.startswith("Bearer ") else f"Bearer {secret}"
+          # 关键修改：直接发送纯密码，不附加 Bearer 前缀
+          auth_header = secret
 
           payload = json.dumps({"articles": all_articles}).encode("utf-8")
 
@@ -104,7 +103,6 @@ jobs:
                   res_text = resp.read().decode("utf-8")
                   print(f"✅ 發送成功 [{worker_url}]:", res_text)
           except HTTPError as e:
-              # 打印服务器返回的具体错误码和内容（如 401 密钥错、500 后端错）
               err_body = e.read().decode("utf-8", errors="ignore")
               print(f"❌ HTTP 请求失败！状态码: {e.code}, 原因: {e.reason}")
               print(f"服务器返回信息: {err_body}")
