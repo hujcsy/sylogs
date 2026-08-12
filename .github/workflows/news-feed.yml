@@ -15,9 +15,11 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import sys
           import time
           from urllib.parse import urlencode
           from urllib.request import Request, urlopen
+          from urllib.error import HTTPError, URLError
           import xml.etree.ElementTree as ET
 
           categories = [
@@ -70,9 +72,21 @@ jobs:
               all_articles.extend(get_items(cat_name, query))
               time.sleep(1)
 
+          if not all_articles:
+              print("❌ 警告：未抓取到任何新闻内容！")
+              sys.exit(1)
+
           worker_url = "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest"
-          secret = os.environ.get("INGEST_SECRET")
-          
+          secret = os.environ.get("INGEST_SECRET", "").strip()
+
+          # 如果 Secret 带空格或格式不妥，进行提示
+          if not secret:
+              print("❌ 错误：GitHub Secret [INGEST_SECRET] 为空，请检查仓库 Settings 设置！")
+              sys.exit(1)
+
+          # 标准化 Authorization Header（自动识别是否需要加 Bearer）
+          auth_header = secret if secret.startswith("Bearer ") else f"Bearer {secret}"
+
           payload = json.dumps({"articles": all_articles}).encode("utf-8")
 
           req = Request(
@@ -81,14 +95,24 @@ jobs:
               method="POST",
               headers={
                   "Content-Type": "application/json",
-                  "Authorization": secret,
+                  "Authorization": auth_header,
                   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
               },
           )
           try:
               with urlopen(req, timeout=30) as resp:
                   res_text = resp.read().decode("utf-8")
-                  print(f"發送成功 [{worker_url}]:", res_text)
+                  print(f"✅ 發送成功 [{worker_url}]:", res_text)
+          except HTTPError as e:
+              # 打印服务器返回的具体错误码和内容（如 401 密钥错、500 后端错）
+              err_body = e.read().decode("utf-8", errors="ignore")
+              print(f"❌ HTTP 请求失败！状态码: {e.code}, 原因: {e.reason}")
+              print(f"服务器返回信息: {err_body}")
+              sys.exit(1)
+          except URLError as e:
+              print(f"❌ 网络链接失败: {e.reason}")
+              sys.exit(1)
           except Exception as e:
-              print(f"發送失敗: {e}")
+              print(f"❌ 未知错误: {e}")
+              sys.exit(1)
           PY
