@@ -73,28 +73,27 @@ jobs:
               time.sleep(1)
 
           if not all_articles:
-              print("❌ 警告：未抓取到任何新闻内容！")
+              print("❌ 错误：未抓取到任何新闻，流程终止。")
               sys.exit(1)
 
           worker_url = "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest"
           secret = os.environ.get("INGEST_SECRET", "").strip()
 
           if not secret:
-              print("❌ 错误：GitHub Secret [INGEST_SECRET] 为空！")
+              print("❌ 错误：GitHub Secret [INGEST_SECRET] 为空！请先去 Settings 配置。")
               sys.exit(1)
-
-          # 关键修改：直接发送纯密码，不附加 Bearer 前缀
-          auth_header = secret
 
           payload = json.dumps({"articles": all_articles}).encode("utf-8")
 
+          # 同时传入 Authorization 和 x-admin-key 确保后端能识别
           req = Request(
               worker_url,
               data=payload,
               method="POST",
               headers={
                   "Content-Type": "application/json",
-                  "Authorization": auth_header,
+                  "Authorization": secret,
+                  "x-admin-key": secret,
                   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
               },
           )
