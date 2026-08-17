@@ -54,12 +54,21 @@ jobs:
                               link = (item.findtext("link") or "").strip()
                               source_el = item.find("source")
                               source = source_el.text.strip() if source_el is not None and source_el.text else "網絡新聞"
+                              # === 新增：提取描述/正文 ===
+                              description = (item.findtext("description") or "").strip()
+                              # 有些 RSS 用 content:encoded 存放正文
+                              content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
+                              body = content_encoded or description
+                              if not body:
+                                  body = title  # 如果都没有，用标题兜底，至少不为空
+                              # ========================
                               if title and link:
                                   items.append({
                                       "title": title,
                                       "link": link,
                                       "source": source,
-                                      "category": cat_name
+                                      "category": cat_name,
+                                      "content": body   # 新增字段
                                   })
                           if items:
                               return items
