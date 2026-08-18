@@ -27,10 +27,10 @@ jobs:
           import trafilatura
 
           categories = [
-              ("時事", "國際"),
-              ("科技動態", "科技"),
-              ("焦點新聞", "熱門新聞"),
-              ("金融", "金融"),
+              ("時事", "world news"),
+              ("科技動態", "technology"),
+              ("焦點新聞", "top stories"),
+              ("金融", "finance"),
           ]
 
           def clean_html(raw):
@@ -53,7 +53,7 @@ jobs:
                           title = (item.findtext("title") or "").strip()
                           link = (item.findtext("link") or "").strip()
                           source_el = item.find("source")
-                          source = source_el.text.strip() if source_el is not None and source_el.text else "網絡新聞"
+                          source = source_el.text.strip() if source_el is not None and source_el.text else "International News"
                           description = (item.findtext("description") or "").strip()
                           content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
                           raw_body = content_encoded or description
@@ -71,14 +71,21 @@ jobs:
                   return []
 
           def get_items(cat_name, query):
-              # 先尝试 Bing
-              bing_url = "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"})
+              bing_url = "https://www.bing.com/news/search?" + urlencode({
+                  "q": query,
+                  "format": "rss",
+                  "mkt": "en-US"
+              })
               items = fetch_rss(bing_url)
               if items:
                   print(f"✅ {cat_name}: Bing 获取到 {len(items)} 篇")
                   return items
-              # 如果 Bing 为空，尝试 Google
-              google_url = "https://news.google.com/rss/search?" + urlencode({"q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"})
+              google_url = "https://news.google.com/rss/search?" + urlencode({
+                  "q": query,
+                  "hl": "en-US",
+                  "gl": "US",
+                  "ceid": "US:en"
+              })
               items = fetch_rss(google_url)
               print(f"✅ {cat_name}: Google 获取到 {len(items)} 篇")
               return items
@@ -87,9 +94,7 @@ jobs:
               desc = item.get("content", "")
               if len(desc) >= 50:
                   return desc[:4000]
-              # 尝试 trafilatura 提取
               link = item["link"]
-              # 如果是 Bing/Google 跳转，尝试提取真实 URL
               try:
                   from urllib.parse import urlparse, parse_qs
                   parsed = urlparse(link)
