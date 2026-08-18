@@ -29,9 +29,11 @@ jobs:
               ("金融", "金融 OR 財經"),
           ]
 
-          def fetch_url(url, timeout=20):
+          def fetch_url(url, timeout=20, headers=None):
+              if headers is None:
+                  headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
               try:
-                  req = Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+                  req = Request(url, headers=headers)
                   with urlopen(req, timeout=timeout) as resp:
                       return resp.read().decode("utf-8", errors="ignore")
               except Exception as e:
@@ -39,7 +41,6 @@ jobs:
                   return ""
 
           def get_items(cat_name, query):
-              # 改为 Bing 优先，因为 Bing 的 link 直接指向原文
               urls = [
                   "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"}),
                   "https://news.google.com/rss/search?" + urlencode({"q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"}),
@@ -77,10 +78,36 @@ jobs:
                       continue
               return []
 
+          def clean_jina_text(text):
+              # 如果包含 Markdown Content: 标记，取其之后的内容
+              marker = "Markdown Content:"
+              if marker in text:
+                  text = text.split(marker, 1)[1]
+              # 按行清洗
+              lines = text.splitlines()
+              cleaned = []
+              for line in lines:
+                  line = line.strip()
+                  if not line:
+                      continue
+                  # 跳过图片行
+                  if line.startswith("![") or line.startswith("!["):
+                      continue
+                  # 跳过导航链接行（如 * [财经](...) 或 [财经](...)）
+                  if (line.startswith("* [") or line.startswith("- [") or line.startswith("[")) and "](" in line:
+                      continue
+                  # 跳过元数据行
+                  if line.startswith("Title:") or line.startswith("URL Source:") or line.startswith("Markdown Content:"):
+                      continue
+                  cleaned.append(line)
+              result = " ".join(cleaned)
+              result = " ".join(result.split())
+              return result
+
           def fetch_full_text(item):
               link = item["link"]
               original = link
-              # 如果是 Google News 链接，尝试提取真实 URL（通常无效，所以优先用 Bing）
+              # 如果是 Google News 链接，尝试提取真实 URL
               if "news.google.com" in link:
                   try:
                       from urllib.parse import urlparse, parse_qs
@@ -90,12 +117,18 @@ jobs:
                           original = qs["url"][0]
                   except:
                       pass
-              # 使用 Jina Reader 抓取
+
+              # 使用 Jina Reader 抓取，并请求纯文本格式
               jina_url = "https://r.jina.ai/" + quote(original, safe="")
-              text = fetch_url(jina_url, timeout=20)
+              text = fetch_url(jina_url, timeout=20, headers={"X-Return-Format": "text"})
               if text and len(text) > 200:
-                  print(f"✅ 抓到正文: {item['title'][:30]}... 长度={len(text)}")
-                  return text[:4000]
+                  cleaned = clean_jina_text(text)
+                  if len(cleaned) > 200:
+                      print(f"✅ 抓到正文: {item['title'][:30]}... 长度={len(cleaned)}")
+                      return cleaned[:4000]
+                  else:
+                      print(f"❌ 清洗后太短: {item['title'][:30]}... 清洗长度={len(cleaned)}")
+                      return ""
               else:
                   print(f"❌ 抓取失败: {item['title'][:30]}... 返回长度={len(text)}")
                   return ""
@@ -111,7 +144,6 @@ jobs:
                   time.sleep(0.5)
               time.sleep(1)
 
-          # 统计
           good = sum(1 for a in all_articles if len(a.get("content","")) > 200)
           print(f"📊 总共 {len(all_articles)} 篇，其中正文有效 {good} 篇")
 
