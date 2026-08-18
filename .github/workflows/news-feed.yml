@@ -17,7 +17,7 @@ jobs:
           import os
           import sys
           import time
-          from urllib.parse import urlencode, quote, urlparse, parse_qs
+          from urllib.parse import urlencode, quote
           from urllib.request import Request, urlopen
           from urllib.error import HTTPError, URLError
           import xml.etree.ElementTree as ET
@@ -34,13 +34,15 @@ jobs:
                   req = Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
                   with urlopen(req, timeout=timeout) as resp:
                       return resp.read().decode("utf-8", errors="ignore")
-              except Exception:
+              except Exception as e:
+                  print(f"fetch_url error: {e}")
                   return ""
 
           def get_items(cat_name, query):
+              # 改为 Bing 优先，因为 Bing 的 link 直接指向原文
               urls = [
+                  "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"}),
                   "https://news.google.com/rss/search?" + urlencode({"q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"}),
-                  "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"})
               ]
               for url in urls:
                   try:
@@ -58,9 +60,7 @@ jobs:
                               source = source_el.text.strip() if source_el is not None and source_el.text else "網絡新聞"
                               description = (item.findtext("description") or "").strip()
                               content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
-                              body = content_encoded or description
-                              if not body:
-                                  body = title
+                              body = content_encoded or description or title
                               if title and link:
                                   items.append({
                                       "title": title,
@@ -70,41 +70,50 @@ jobs:
                                       "content": body
                                   })
                           if items:
+                              print(f"✅ {cat_name}: 从 {url} 获取到 {len(items)} 篇")
                               return items
-                  except Exception:
+                  except Exception as e:
+                      print(f"❌ {cat_name}: {url} 抓取失败: {e}")
                       continue
               return []
 
-          def get_original_url(link):
-              try:
-                  parsed = urlparse(link)
-                  qs = parse_qs(parsed.query)
-                  if "url" in qs:
-                      return qs["url"][0]
-              except Exception:
-                  pass
-              return link
-
-          def fetch_full_text(link):
-              original = get_original_url(link)
-              # 调用 Jina Reader 获取正文（免费无需 key）
+          def fetch_full_text(item):
+              link = item["link"]
+              original = link
+              # 如果是 Google News 链接，尝试提取真实 URL（通常无效，所以优先用 Bing）
+              if "news.google.com" in link:
+                  try:
+                      from urllib.parse import urlparse, parse_qs
+                      parsed = urlparse(link)
+                      qs = parse_qs(parsed.query)
+                      if "url" in qs:
+                          original = qs["url"][0]
+                  except:
+                      pass
+              # 使用 Jina Reader 抓取
               jina_url = "https://r.jina.ai/" + quote(original, safe="")
               text = fetch_url(jina_url, timeout=20)
               if text and len(text) > 200:
+                  print(f"✅ 抓到正文: {item['title'][:30]}... 长度={len(text)}")
                   return text[:4000]
-              return ""
+              else:
+                  print(f"❌ 抓取失败: {item['title'][:30]}... 返回长度={len(text)}")
+                  return ""
 
           all_articles = []
           for cat_name, query in categories:
               items = get_items(cat_name, query)
               for item in items:
-                  full = fetch_full_text(item["link"])
+                  full = fetch_full_text(item)
                   if full:
                       item["content"] = full
-                  # 如果抓取失败，保留 RSS 原 content（可能短，Worker 会过滤）
                   all_articles.append(item)
                   time.sleep(0.5)
               time.sleep(1)
+
+          # 统计
+          good = sum(1 for a in all_articles if len(a.get("content","")) > 200)
+          print(f"📊 总共 {len(all_articles)} 篇，其中正文有效 {good} 篇")
 
           if not all_articles:
               print("❌ 错误：未抓取到任何新闻，流程终止。")
