@@ -1,259 +1,146 @@
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
+name: 獲取新聞並發送至 Cloudflare D1
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
 
-    if (request.method === "POST" && url.pathname === "/ingest") {
-      return await handleIngest(request, env, ctx);
-    }
+jobs:
+  fetch-and-send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch RSS and POST to Cloudflare Worker
+        env:
+          INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import time
+          from urllib.parse import urlencode, quote, urlparse, parse_qs
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError, URLError
+          import xml.etree.ElementTree as ET
 
-    if (request.method === "GET" && url.pathname === "/process-pending") {
-      const auth = request.headers.get("Authorization") || "";
-      const cleanAuth = auth.replace(/^Bearer\s+/i, "").trim();
-      const expected = (env.INGEST_SECRET || "").trim();
-      if (!cleanAuth || cleanAuth !== expected) {
-        return new Response("Unauthorized", { status: 401 });
-      }
-      const processed = await processPendingArticles(env, 5);
-      return new Response(JSON.stringify({ processed }, null, 2), {
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-      });
-    }
+          categories = [
+              ("時事", "國際 OR 世界"),
+              ("科技動態", "科技"),
+              ("焦點新聞", "熱門新聞"),
+              ("金融", "金融 OR 財經"),
+          ]
 
-    return new Response("Not Found", { status: 404 });
-  },
+          def fetch_url(url, timeout=20):
+              try:
+                  req = Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+                  with urlopen(req, timeout=timeout) as resp:
+                      return resp.read().decode("utf-8", errors="ignore")
+              except Exception:
+                  return ""
 
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(processPendingArticles(env, 3));
-  },
-};
+          def get_items(cat_name, query):
+              urls = [
+                  "https://news.google.com/rss/search?" + urlencode({"q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"}),
+                  "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"})
+              ]
+              for url in urls:
+                  try:
+                      req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                      with urlopen(req, timeout=15) as response:
+                          content = response.read()
+                          if content.strip().startswith(b"<!DOCTYPE") or content.strip().startswith(b"<html"):
+                              continue
+                          root = ET.fromstring(content)
+                          items = []
+                          for item in root.findall("./channel/item")[:8]:
+                              title = (item.findtext("title") or "").strip()
+                              link = (item.findtext("link") or "").strip()
+                              source_el = item.find("source")
+                              source = source_el.text.strip() if source_el is not None and source_el.text else "網絡新聞"
+                              description = (item.findtext("description") or "").strip()
+                              content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
+                              body = content_encoded or description
+                              if not body:
+                                  body = title
+                              if title and link:
+                                  items.append({
+                                      "title": title,
+                                      "link": link,
+                                      "source": source,
+                                      "category": cat_name,
+                                      "content": body
+                                  })
+                          if items:
+                              return items
+                  except Exception:
+                      continue
+              return []
 
-async function handleIngest(request, env, ctx) {
-  const auth = request.headers.get("Authorization") || "";
-  const cleanAuth = auth.replace(/^Bearer\s+/i, "").trim();
-  const expected = (env.INGEST_SECRET || "").trim();
-  if (!cleanAuth || cleanAuth !== expected) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+          def get_original_url(link):
+              try:
+                  parsed = urlparse(link)
+                  qs = parse_qs(parsed.query)
+                  if "url" in qs:
+                      return qs["url"][0]
+              except Exception:
+                  pass
+              return link
 
-  let body;
-  try {
-    body = await request.json();
-  } catch (e) {
-    return new Response("Invalid JSON", { status: 400 });
-  }
+          def fetch_full_text(link):
+              original = get_original_url(link)
+              # 调用 Jina Reader 获取正文（免费无需 key）
+              jina_url = "https://r.jina.ai/" + quote(original, safe="")
+              text = fetch_url(jina_url, timeout=20)
+              if text and len(text) > 200:
+                  return text[:4000]
+              return ""
 
-  const articles = Array.isArray(body.articles) ? body.articles : [];
-  let inserted = 0;
+          all_articles = []
+          for cat_name, query in categories:
+              items = get_items(cat_name, query)
+              for item in items:
+                  full = fetch_full_text(item["link"])
+                  if full:
+                      item["content"] = full
+                  # 如果抓取失败，保留 RSS 原 content（可能短，Worker 会过滤）
+                  all_articles.append(item)
+                  time.sleep(0.5)
+              time.sleep(1)
 
-  for (const a of articles) {
-    if (!a.title || !a.link) continue;
-    try {
-      const result = await env.DB.prepare(
-        "INSERT OR IGNORE INTO pending_articles (title, content, link, source, category) VALUES (?, ?, ?, ?, ?)"
-      ).bind(
-        a.title,
-        a.content || a.description || a.content_encoded || a.summary || null,
-        a.link,
-        a.source || "",
-        a.category || ""
-      ).run();
-      if (result.meta && result.meta.changes > 0) inserted++;
-    } catch (e) {
-      // 单笔失败不影响其他
-    }
-  }
+          if not all_articles:
+              print("❌ 错误：未抓取到任何新闻，流程终止。")
+              sys.exit(1)
 
-  ctx.waitUntil(processPendingArticles(env, 5));
+          worker_url = "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest"
+          secret = os.environ.get("INGEST_SECRET", "").strip()
+          if not secret:
+              print("❌ 错误：GitHub Secret [INGEST_SECRET] 为空！请先去 Settings 配置。")
+              sys.exit(1)
 
-  return new Response(
-    JSON.stringify({ ok: true, received: articles.length, inserted }),
-    { headers: { "Content-Type": "application/json; charset=utf-8" } }
-  );
-}
-
-function extractTextFromHtml(html) {
-  if (!html) return "";
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function extractOriginalUrlFromGoogleNews(link) {
-  try {
-    const url = new URL(link);
-    const target = url.searchParams.get("url");
-    if (target) return target;
-  } catch (e) {}
-  return link;
-}
-
-async function fetchWithTimeout(url, timeoutMs = 20000) {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const resp = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-      },
-      redirect: "follow",
-    });
-    clearTimeout(timer);
-    return resp;
-  } catch (e) {
-    return null;
-  }
-}
-
-async function tryFetchArticleText(link) {
-  // 1. 提取原始 URL
-  const originalUrl = extractOriginalUrlFromGoogleNews(link);
-
-  // 2. 尝试直接抓取原始 URL
-  const resp = await fetchWithTimeout(originalUrl, 15000);
-  if (resp && resp.ok) {
-    try {
-      const html = await resp.text();
-      const text = extractTextFromHtml(html);
-      if (text && text.length > 200) {
-        return text.slice(0, 4000);
-      }
-    } catch (e) {}
-  }
-
-  // 3. 回退：使用 Jina Reader 抓取（支持 Google News 链接）
-  try {
-    const jinaUrl = `https://r.jina.ai/${encodeURIComponent(originalUrl)}`;
-    const jinaResp = await fetch(jinaUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-    });
-    if (jinaResp.ok) {
-      const jinaText = await jinaResp.text();
-      if (jinaText && jinaText.length > 200) {
-        return jinaText.slice(0, 4000);
-      }
-    }
-  } catch (e) {}
-
-  return "";
-}
-
-async function generateSummary(env, title, source, articleText) {
-  // 只有正文足够长才生成摘要，否则返回空（但这种情况会被过滤掉）
-  if (!articleText || articleText.length < 200) return "";
-
-  const prompt = `你是新聞編輯。請根據以下新聞全文,用繁體中文寫一段80-120字的精簡摘要,只輸出摘要本身,不要加任何說明或標題:\n\n標題:${title}\n來源:${source}\n內文:${articleText}`;
-
-  try {
-    const aiResp = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 500,
-    });
-    const result = extractAiText(aiResp);
-    if (result && result.trim()) return result.trim();
-  } catch (e) {}
-
-  // AI 失败或没有结果时，用正文前 150 字兜底
-  return articleText.slice(0, 150);
-}
-
-function extractAiText(aiResp) {
-  if (!aiResp) return "";
-  if (typeof aiResp.response === "string" && aiResp.response.trim()) return aiResp.response.trim();
-  const msg = aiResp.choices && aiResp.choices[0] && aiResp.choices[0].message;
-  if (msg && typeof msg.content === "string" && msg.content.trim()) return msg.content.trim();
-  return "";
-}
-
-async function generateInsight(env, title, category, summary) {
-  const prompt = `你是一位深度觀察者,請針對以下新聞撰寫一段約200字的獨家評論。要求:
-1. 從該事件對產業/金融/財富的影響角度切入
-2. 必須包含「我認為」或「從我的視角來看」這類第一人稱表達
-3. 若該新聞適合,結尾可加1則簡短、切實可行的避坑或行動建議(1-2句即可,不適合的話不用勉強加)
-4. 只輸出評論本身,不要標題、不要markdown符號、不要任何說明文字
-5. 若資訊不足以做出有意義的產業/金融分析(例如純運動賽果、娛樂八卦、生活資訊),直接輸出「SKIP」四個字,不要硬寫評論
-
-分類:${category}
-標題:${title}
-摘要:${summary}`;
-
-  try {
-    const aiResp = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 600,
-    });
-    const result = extractAiText(aiResp);
-    if (!result || !result.trim() || result.trim() === "SKIP" || result.includes("SKIP")) return "";
-    return result.trim();
-  } catch (e) {
-    return "";
-  }
-}
-
-async function processPendingArticles(env, limit) {
-  const { results } = await env.DB.prepare(
-    "SELECT id, title, content, link, source, category FROM pending_articles ORDER BY id ASC LIMIT ?"
-  ).bind(limit).all();
-
-  const MIN_CONTENT_LENGTH = 200;
-  let processed = 0;
-
-  for (const row of results) {
-    try {
-      let articleText = "";
-
-      // 先看 RSS 自带的 content 是否足够长（清洗后）
-      if (row.content) {
-        const cleaned = extractTextFromHtml(row.content);
-        if (cleaned && cleaned.length >= MIN_CONTENT_LENGTH) {
-          articleText = cleaned;
-        }
-      }
-
-      // 不够长则尝试抓取原文
-      if (!articleText) {
-        articleText = await tryFetchArticleText(row.link);
-      }
-
-      // 最终正文仍不达标：直接丢弃
-      if (!articleText || articleText.length < MIN_CONTENT_LENGTH) {
-        await env.DB.prepare("DELETE FROM pending_articles WHERE id = ?").bind(row.id).run();
-        continue;
-      }
-
-      const summary = await generateSummary(env, row.title, row.source, articleText);
-      const insight = await generateInsight(env, row.title, row.category, summary);
-
-      await env.DB.prepare(
-        "INSERT OR IGNORE INTO articles (title, content, summary, link, source, category, published_at, editor_comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-      ).bind(
-        row.title,
-        articleText,
-        summary,
-        row.link,
-        row.source,
-        row.category,
-        new Date().toISOString(),
-        insight || null
-      ).run();
-
-      await env.DB.prepare("DELETE FROM pending_articles WHERE id = ?").bind(row.id).run();
-      processed++;
-    } catch (e) {
-      console.error(`[process] id=${row.id} 失败: ${e.message}`);
-    }
-  }
-
-  return processed;
-}
+          payload = json.dumps({"articles": all_articles}).encode("utf-8")
+          req = Request(
+              worker_url,
+              data=payload,
+              method="POST",
+              headers={
+                  "Content-Type": "application/json",
+                  "Authorization": secret,
+                  "x-admin-key": secret,
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+              },
+          )
+          try:
+              with urlopen(req, timeout=30) as resp:
+                  res_text = resp.read().decode("utf-8")
+                  print(f"✅ 發送成功 [{worker_url}]:", res_text)
+          except HTTPError as e:
+              err_body = e.read().decode("utf-8", errors="ignore")
+              print(f"❌ HTTP 请求失败！状态码: {e.code}, 原因: {e.reason}")
+              print(f"服务器返回信息: {err_body}")
+              sys.exit(1)
+          except URLError as e:
+              print(f"❌ 网络链接失败: {e.reason}")
+              sys.exit(1)
+          except Exception as e:
+              print(f"❌ 未知错误: {e}")
+              sys.exit(1)
+          PY
