@@ -52,7 +52,6 @@ async function handleIngest(request, env, ctx) {
         "INSERT OR IGNORE INTO pending_articles (title, content, link, source, category) VALUES (?, ?, ?, ?, ?)"
       ).bind(
         a.title,
-        // 兼容不同 RSS 字段名
         a.content || a.description || a.content_encoded || a.summary || null,
         a.link,
         a.source || "",
@@ -60,11 +59,10 @@ async function handleIngest(request, env, ctx) {
       ).run();
       if (result.meta && result.meta.changes > 0) inserted++;
     } catch (e) {
-      // 單筆失敗不影響其他筆
+      // 单笔失败不影响其他
     }
   }
 
-  // 抓取成功后自动处理，无需等待定时任务
   ctx.waitUntil(processPendingArticles(env, 5));
 
   return new Response(
@@ -73,19 +71,9 @@ async function handleIngest(request, env, ctx) {
   );
 }
 
-function looksLikeBlockedPage(text) {
-  if (!text || text.length < 200) return true;
-  const blockSignals = [
-    "unusual traffic", "automated queries", "偵測到您的電腦或網路",
-    "sorry", "Our systems have detected", "captcha", "recaptcha",
-  ];
-  const lower = text.toLowerCase();
-  return blockSignals.some((sig) => lower.includes(sig.toLowerCase()));
-}
-
 function extractTextFromHtml(html) {
   if (!html) return "";
-  let text = html
+  return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
@@ -96,31 +84,76 @@ function extractTextFromHtml(html) {
     .replace(/&quot;/g, '"')
     .replace(/\s+/g, " ")
     .trim();
-  return text;
 }
 
-async function tryFetchArticleText(link) {
+function extractOriginalUrlFromGoogleNews(link) {
   try {
-    const resp = await fetch(link, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; sylogs-bot/1.0)" },
+    const url = new URL(link);
+    const target = url.searchParams.get("url");
+    if (target) return target;
+  } catch (e) {}
+  return link;
+}
+
+async function fetchWithTimeout(url, timeoutMs = 20000) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const resp = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+      },
       redirect: "follow",
-      cf: { timeout: 8000 },
     });
-    if (!resp.ok) return "";
-    const html = await resp.text();
-    const text = extractTextFromHtml(html);
-    if (looksLikeBlockedPage(text)) return "";
-    return text.slice(0, 4000);
+    clearTimeout(timer);
+    return resp;
   } catch (e) {
-    return "";
+    return null;
   }
 }
 
+async function tryFetchArticleText(link) {
+  // 1. 提取原始 URL
+  const originalUrl = extractOriginalUrlFromGoogleNews(link);
+
+  // 2. 尝试直接抓取原始 URL
+  const resp = await fetchWithTimeout(originalUrl, 15000);
+  if (resp && resp.ok) {
+    try {
+      const html = await resp.text();
+      const text = extractTextFromHtml(html);
+      if (text && text.length > 200) {
+        return text.slice(0, 4000);
+      }
+    } catch (e) {}
+  }
+
+  // 3. 回退：使用 Jina Reader 抓取（支持 Google News 链接）
+  try {
+    const jinaUrl = `https://r.jina.ai/${encodeURIComponent(originalUrl)}`;
+    const jinaResp = await fetch(jinaUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+    });
+    if (jinaResp.ok) {
+      const jinaText = await jinaResp.text();
+      if (jinaText && jinaText.length > 200) {
+        return jinaText.slice(0, 4000);
+      }
+    }
+  } catch (e) {}
+
+  return "";
+}
+
 async function generateSummary(env, title, source, articleText) {
-  const hasFullText = articleText && articleText.length > 0; // 只要有文字就认为有正文
-  const prompt = hasFullText
-    ? `你是新聞編輯。請根據以下新聞全文,用繁體中文寫一段80-120字的精簡摘要,只輸出摘要本身,不要加任何說明或標題:\n\n標題:${title}\n來源:${source}\n內文:${articleText}`
-    : `你是新聞編輯。以下只有新聞標題,沒有全文。請根據標題與來源,用繁體中文寫一句30-50字左右的合理推測性摘要(語氣需明確表示這是根據標題的簡述,不要虛構具體數據或引述),只輸出摘要本身:\n\n標題:${title}\n來源:${source}`;
+  // 只有正文足够长才生成摘要，否则返回空（但这种情况会被过滤掉）
+  if (!articleText || articleText.length < 200) return "";
+
+  const prompt = `你是新聞編輯。請根據以下新聞全文,用繁體中文寫一段80-120字的精簡摘要,只輸出摘要本身,不要加任何說明或標題:\n\n標題:${title}\n來源:${source}\n內文:${articleText}`;
 
   try {
     const aiResp = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
@@ -128,10 +161,11 @@ async function generateSummary(env, title, source, articleText) {
       max_tokens: 500,
     });
     const result = extractAiText(aiResp);
-    return result && result.trim() ? result.trim() : title;
-  } catch (e) {
-    return title;
-  }
+    if (result && result.trim()) return result.trim();
+  } catch (e) {}
+
+  // AI 失败或没有结果时，用正文前 150 字兜底
+  return articleText.slice(0, 150);
 }
 
 function extractAiText(aiResp) {
@@ -143,8 +177,7 @@ function extractAiText(aiResp) {
 }
 
 async function generateInsight(env, title, category, summary) {
-  const prompt = `你是一位深度觀察者,請針對以下新聞撰寫一段約200字的獨家評論。
-要求:
+  const prompt = `你是一位深度觀察者,請針對以下新聞撰寫一段約200字的獨家評論。要求:
 1. 從該事件對產業/金融/財富的影響角度切入
 2. 必須包含「我認為」或「從我的視角來看」這類第一人稱表達
 3. 若該新聞適合,結尾可加1則簡短、切實可行的避坑或行動建議(1-2句即可,不適合的話不用勉強加)
@@ -173,31 +206,40 @@ async function processPendingArticles(env, limit) {
     "SELECT id, title, content, link, source, category FROM pending_articles ORDER BY id ASC LIMIT ?"
   ).bind(limit).all();
 
+  const MIN_CONTENT_LENGTH = 200;
   let processed = 0;
+
   for (const row of results) {
     try {
-      // 先清洗 RSS 提供的 content，只要有文字就使用，不再要求长度
       let articleText = "";
+
+      // 先看 RSS 自带的 content 是否足够长（清洗后）
       if (row.content) {
         const cleaned = extractTextFromHtml(row.content);
-        if (cleaned && cleaned.length > 0) {
+        if (cleaned && cleaned.length >= MIN_CONTENT_LENGTH) {
           articleText = cleaned;
         }
       }
-      // 如果清洗后没有任何文字，才尝试抓取原文
+
+      // 不够长则尝试抓取原文
       if (!articleText) {
         articleText = await tryFetchArticleText(row.link);
+      }
+
+      // 最终正文仍不达标：直接丢弃
+      if (!articleText || articleText.length < MIN_CONTENT_LENGTH) {
+        await env.DB.prepare("DELETE FROM pending_articles WHERE id = ?").bind(row.id).run();
+        continue;
       }
 
       const summary = await generateSummary(env, row.title, row.source, articleText);
       const insight = await generateInsight(env, row.title, row.category, summary);
 
       await env.DB.prepare(
-        `INSERT OR IGNORE INTO articles (title, content, summary, link, source, category, published_at, editor_comment)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        "INSERT OR IGNORE INTO articles (title, content, summary, link, source, category, published_at, editor_comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(
         row.title,
-        articleText || null,
+        articleText,
         summary,
         row.link,
         row.source,
@@ -209,8 +251,9 @@ async function processPendingArticles(env, limit) {
       await env.DB.prepare("DELETE FROM pending_articles WHERE id = ?").bind(row.id).run();
       processed++;
     } catch (e) {
-      console.error(`[process] id=${row.id} 失敗: ${e.message}`);
+      console.error(`[process] id=${row.id} 失败: ${e.message}`);
     }
   }
+
   return processed;
 }
