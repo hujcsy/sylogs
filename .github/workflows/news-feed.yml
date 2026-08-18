@@ -20,7 +20,7 @@ jobs:
           import time
           import re
           import html as html_lib
-          from urllib.parse import urlencode, urlparse, parse_qs
+          from urllib.parse import urlencode
           from urllib.request import Request, urlopen
           from urllib.error import HTTPError, URLError
           import xml.etree.ElementTree as ET
@@ -36,13 +36,9 @@ jobs:
           def clean_html(raw):
               if not raw:
                   return ""
-              # 去掉 script/style
               raw = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', raw, flags=re.DOTALL|re.IGNORECASE)
-              # 去掉标签
               raw = re.sub(r'<[^>]+>', ' ', raw)
-              # 解码 HTML 实体
               raw = html_lib.unescape(raw)
-              # 合并空白
               raw = re.sub(r'\s+', ' ', raw).strip()
               return raw
 
@@ -51,18 +47,15 @@ jobs:
                   req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
                   with urlopen(req, timeout=15) as resp:
                       content = resp.read()
-                      if content.strip().startswith(b"<!DOCTYPE") or content.strip().startswith(b"<html"):
-                          return []
                       root = ET.fromstring(content)
                       items = []
-                      for item in root.findall("./channel/item")[:8]:
+                      for item in root.findall("./channel/item")[:10]:
                           title = (item.findtext("title") or "").strip()
                           link = (item.findtext("link") or "").strip()
                           source_el = item.find("source")
                           source = source_el.text.strip() if source_el is not None and source_el.text else "網絡新聞"
                           description = (item.findtext("description") or "").strip()
                           content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
-                          # 优先取 content_encoded，否则 description
                           raw_body = content_encoded or description
                           body_clean = clean_html(raw_body)
                           if title and link:
@@ -71,27 +64,22 @@ jobs:
                                   "link": link,
                                   "source": source,
                                   "category": cat_name,
-                                  "content": body_clean  # 先存清洗后的描述
+                                  "content": body_clean
                               })
                       return items
               except Exception:
                   return []
 
           def get_items(cat_name, query):
-              urls = [
-                  "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"}),
-                  "https://news.google.com/rss/search?" + urlencode({"q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"}),
-              ]
-              for url in urls:
-                  items = fetch_rss(url)
-                  if items:
-                      print(f"✅ {cat_name}: 获取到 {len(items)} 篇")
-                      return items
-              return []
+              # 只使用 Bing News，保证描述较长
+              url = "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"})
+              return fetch_rss(url)
 
           def extract_real_url(link):
-              if "news.google.com" in link:
+              # 如果是 Bing 的跳转链接，尝试提取真实 URL
+              if "bing.com/news/apiclick" in link:
                   try:
+                      from urllib.parse import urlparse, parse_qs
                       parsed = urlparse(link)
                       qs = parse_qs(parsed.query)
                       if "url" in qs:
@@ -100,30 +88,19 @@ jobs:
                       pass
               return link
 
-          def is_noisy(text):
-              # 检测是否包含导航/菜单等噪声
-              noise_words = ["設首頁", "意見收集", "登入", "註冊", "手機版網頁", "專業報價服務",
-                             "財經視頻", "最新影片", "投資教學", "地產家居", "貓達人", "收市有偈",
-                             "午市博奕", "學市學菲", "直播時間表", "巿場動態", "即時期貨",
-                             "公司通告", "活躍股票", "創新高/低股票", "公司派息", "簡", "EN"]
-              for w in noise_words:
-                  if w in text:
-                      return True
-              return False
-
           def fetch_full_text(item):
-              # 如果 RSS 描述足够长（>100），直接使用
               desc = item.get("content", "")
-              if len(desc) > 100:
+              # 只要描述长度 >= 50 就直接使用，不再依赖全文抓取
+              if len(desc) >= 50:
                   return desc[:4000]
-              # 否则尝试 trafilatura 提取
+              # 如果描述太短，尝试 trafilatura 提取
               link = item["link"]
               original = extract_real_url(link)
               try:
                   downloaded = trafilatura.fetch_url(original)
                   if downloaded:
                       text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
-                      if text and len(text) > 200 and not is_noisy(text):
+                      if text and len(text) >= 50:
                           return text[:4000]
               except Exception:
                   pass
@@ -132,6 +109,7 @@ jobs:
           all_articles = []
           for cat_name, query in categories:
               items = get_items(cat_name, query)
+              print(f"✅ {cat_name}: 获取到 {len(items)} 篇")
               for item in items:
                   full_text = fetch_full_text(item)
                   if full_text:
