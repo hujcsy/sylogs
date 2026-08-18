@@ -12,7 +12,7 @@ jobs:
         env:
           INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
         run: |
-          pip install trafilatura --quiet
+          pip install deep-translator --quiet
           python - <<'PY'
           import json
           import os
@@ -24,7 +24,7 @@ jobs:
           from urllib.request import Request, urlopen
           from urllib.error import HTTPError, URLError
           import xml.etree.ElementTree as ET
-          import trafilatura
+          from deep_translator import GoogleTranslator, MyMemoryTranslator
 
           categories = [
               ("時事", "world news"),
@@ -90,41 +90,42 @@ jobs:
               print(f"✅ {cat_name}: Google 获取到 {len(items)} 篇")
               return items
 
-          def fetch_full_text(item):
-              desc = item.get("content", "")
-              if len(desc) >= 50:
-                  return desc[:4000]
-              link = item["link"]
+          def translate_text(text, target_lang="zh-TW"):
+              if not text or len(text) < 10:
+                  return text
+              # 限制翻译长度，避免超时
+              text = text[:1000]
               try:
-                  from urllib.parse import urlparse, parse_qs
-                  parsed = urlparse(link)
-                  qs = parse_qs(parsed.query)
-                  if "url" in qs:
-                      original = qs["url"][0]
-                  else:
-                      original = link
-              except:
-                  original = link
+                  # 优先 Google 翻译
+                  translator = GoogleTranslator(source="auto", target="zh-TW")
+                  result = translator.translate(text)
+                  if result and len(result) > 5:
+                      return result
+              except Exception as e:
+                  print(f"Google 翻译失败: {e}")
               try:
-                  downloaded = trafilatura.fetch_url(original)
-                  if downloaded:
-                      text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
-                      if text and len(text) >= 50:
-                          return text[:4000]
-              except Exception:
-                  pass
-              return ""
+                  # 回退 MyMemory 翻译（免费无需 key）
+                  translator = MyMemoryTranslator(source="en", target="zh-TW")
+                  result = translator.translate(text)
+                  if result and len(result) > 5:
+                      return result
+              except Exception as e:
+                  print(f"MyMemory 翻译失败: {e}")
+              # 翻译失败保留原文
+              return text
 
           all_articles = []
           for cat_name, query in categories:
               items = get_items(cat_name, query)
               for item in items:
-                  full_text = fetch_full_text(item)
-                  if full_text:
-                      item["content"] = full_text
-                      all_articles.append(item)
-                  time.sleep(0.2)
-              time.sleep(0.5)
+                  # 翻译标题和正文
+                  translated_title = translate_text(item["title"])
+                  translated_content = translate_text(item["content"])
+                  item["title"] = translated_title
+                  item["content"] = translated_content
+                  all_articles.append(item)
+                  time.sleep(0.5)  # 避免请求过快
+              time.sleep(1)
 
           good = len(all_articles)
           print(f"📊 有效文章 {good} 篇")
