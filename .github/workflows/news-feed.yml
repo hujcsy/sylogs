@@ -27,10 +27,10 @@ jobs:
           import trafilatura
 
           categories = [
-              ("時事", "國際 OR 世界"),
+              ("時事", "國際"),
               ("科技動態", "科技"),
               ("焦點新聞", "熱門新聞"),
-              ("金融", "金融 OR 財經"),
+              ("金融", "金融"),
           ]
 
           def clean_html(raw):
@@ -71,31 +71,35 @@ jobs:
                   return []
 
           def get_items(cat_name, query):
-              # 只使用 Bing News，保证描述较长
-              url = "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"})
-              return fetch_rss(url)
-
-          def extract_real_url(link):
-              # 如果是 Bing 的跳转链接，尝试提取真实 URL
-              if "bing.com/news/apiclick" in link:
-                  try:
-                      from urllib.parse import urlparse, parse_qs
-                      parsed = urlparse(link)
-                      qs = parse_qs(parsed.query)
-                      if "url" in qs:
-                          return qs["url"][0]
-                  except:
-                      pass
-              return link
+              # 先尝试 Bing
+              bing_url = "https://www.bing.com/news/search?" + urlencode({"q": query, "format": "rss"})
+              items = fetch_rss(bing_url)
+              if items:
+                  print(f"✅ {cat_name}: Bing 获取到 {len(items)} 篇")
+                  return items
+              # 如果 Bing 为空，尝试 Google
+              google_url = "https://news.google.com/rss/search?" + urlencode({"q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"})
+              items = fetch_rss(google_url)
+              print(f"✅ {cat_name}: Google 获取到 {len(items)} 篇")
+              return items
 
           def fetch_full_text(item):
               desc = item.get("content", "")
-              # 只要描述长度 >= 50 就直接使用，不再依赖全文抓取
               if len(desc) >= 50:
                   return desc[:4000]
-              # 如果描述太短，尝试 trafilatura 提取
+              # 尝试 trafilatura 提取
               link = item["link"]
-              original = extract_real_url(link)
+              # 如果是 Bing/Google 跳转，尝试提取真实 URL
+              try:
+                  from urllib.parse import urlparse, parse_qs
+                  parsed = urlparse(link)
+                  qs = parse_qs(parsed.query)
+                  if "url" in qs:
+                      original = qs["url"][0]
+                  else:
+                      original = link
+              except:
+                  original = link
               try:
                   downloaded = trafilatura.fetch_url(original)
                   if downloaded:
@@ -109,7 +113,6 @@ jobs:
           all_articles = []
           for cat_name, query in categories:
               items = get_items(cat_name, query)
-              print(f"✅ {cat_name}: 获取到 {len(items)} 篇")
               for item in items:
                   full_text = fetch_full_text(item)
                   if full_text:
