@@ -18,6 +18,8 @@ jobs:
           import os
           import sys
           import time
+          import re
+          import html as html_lib
           from urllib.parse import urlencode, urlparse, parse_qs
           from urllib.request import Request, urlopen
           from urllib.error import HTTPError, URLError
@@ -30,6 +32,19 @@ jobs:
               ("焦點新聞", "熱門新聞"),
               ("金融", "金融 OR 財經"),
           ]
+
+          def clean_html(raw):
+              if not raw:
+                  return ""
+              # 去掉 script/style
+              raw = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', raw, flags=re.DOTALL|re.IGNORECASE)
+              # 去掉标签
+              raw = re.sub(r'<[^>]+>', ' ', raw)
+              # 解码 HTML 实体
+              raw = html_lib.unescape(raw)
+              # 合并空白
+              raw = re.sub(r'\s+', ' ', raw).strip()
+              return raw
 
           def fetch_rss(url):
               try:
@@ -47,17 +62,19 @@ jobs:
                           source = source_el.text.strip() if source_el is not None and source_el.text else "網絡新聞"
                           description = (item.findtext("description") or "").strip()
                           content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
-                          body = content_encoded or description or title
+                          # 优先取 content_encoded，否则 description
+                          raw_body = content_encoded or description
+                          body_clean = clean_html(raw_body)
                           if title and link:
                               items.append({
                                   "title": title,
                                   "link": link,
                                   "source": source,
-                                  "category": cat_name if 'cat_name' in locals() else "",
-                                  "content": body
+                                  "category": cat_name,
+                                  "content": body_clean  # 先存清洗后的描述
                               })
                       return items
-              except Exception as e:
+              except Exception:
                   return []
 
           def get_items(cat_name, query):
@@ -83,45 +100,46 @@ jobs:
                       pass
               return link
 
-          def extract_article_text(link):
-              # 提取真实 URL
+          def is_noisy(text):
+              # 检测是否包含导航/菜单等噪声
+              noise_words = ["設首頁", "意見收集", "登入", "註冊", "手機版網頁", "專業報價服務",
+                             "財經視頻", "最新影片", "投資教學", "地產家居", "貓達人", "收市有偈",
+                             "午市博奕", "學市學菲", "直播時間表", "巿場動態", "即時期貨",
+                             "公司通告", "活躍股票", "創新高/低股票", "公司派息", "簡", "EN"]
+              for w in noise_words:
+                  if w in text:
+                      return True
+              return False
+
+          def fetch_full_text(item):
+              # 如果 RSS 描述足够长（>100），直接使用
+              desc = item.get("content", "")
+              if len(desc) > 100:
+                  return desc[:4000]
+              # 否则尝试 trafilatura 提取
+              link = item["link"]
               original = extract_real_url(link)
-              # 使用 trafilatura 直接下载并提取正文
               try:
                   downloaded = trafilatura.fetch_url(original)
                   if downloaded:
                       text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
-                      if text and len(text) > 200:
+                      if text and len(text) > 200 and not is_noisy(text):
                           return text[:4000]
-              except Exception as e:
+              except Exception:
                   pass
-              # 如果 trafilatura 失败，尝试用 RSS 描述
-              # 注意：这里会在外层处理
               return ""
 
           all_articles = []
           for cat_name, query in categories:
               items = get_items(cat_name, query)
               for item in items:
-                  full_text = extract_article_text(item["link"])
+                  full_text = fetch_full_text(item)
                   if full_text:
                       item["content"] = full_text
-                  else:
-                      # 回退：使用 RSS 描述，但至少要有一定长度
-                      desc = item.get("content", "")
-                      import re
-                      desc_clean = re.sub(r'<[^>]+>', ' ', desc)
-                      desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
-                      if len(desc_clean) > 100:
-                          item["content"] = desc_clean[:4000]
-                      else:
-                          item["content"] = ""
-                  all_articles.append(item)
-                  time.sleep(0.3)
+                      all_articles.append(item)
+                  time.sleep(0.2)
               time.sleep(0.5)
 
-          # 过滤掉 content 为空的文章
-          all_articles = [a for a in all_articles if a.get("content")]
           good = len(all_articles)
           print(f"📊 有效文章 {good} 篇")
 
