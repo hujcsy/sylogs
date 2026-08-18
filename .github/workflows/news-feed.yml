@@ -12,15 +12,17 @@ jobs:
         env:
           INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
         run: |
+          pip install trafilatura --quiet
           python - <<'PY'
           import json
           import os
           import sys
           import time
-          from urllib.parse import urlencode, quote
+          from urllib.parse import urlencode, urlparse, parse_qs
           from urllib.request import Request, urlopen
           from urllib.error import HTTPError, URLError
           import xml.etree.ElementTree as ET
+          import trafilatura
 
           categories = [
               ("時事", "國際 OR 世界"),
@@ -29,16 +31,34 @@ jobs:
               ("金融", "金融 OR 財經"),
           ]
 
-          def fetch_url(url, timeout=20, headers=None):
-              if headers is None:
-                  headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+          def fetch_rss(url):
               try:
-                  req = Request(url, headers=headers)
-                  with urlopen(req, timeout=timeout) as resp:
-                      return resp.read().decode("utf-8", errors="ignore")
+                  req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                  with urlopen(req, timeout=15) as resp:
+                      content = resp.read()
+                      if content.strip().startswith(b"<!DOCTYPE") or content.strip().startswith(b"<html"):
+                          return []
+                      root = ET.fromstring(content)
+                      items = []
+                      for item in root.findall("./channel/item")[:8]:
+                          title = (item.findtext("title") or "").strip()
+                          link = (item.findtext("link") or "").strip()
+                          source_el = item.find("source")
+                          source = source_el.text.strip() if source_el is not None and source_el.text else "網絡新聞"
+                          description = (item.findtext("description") or "").strip()
+                          content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
+                          body = content_encoded or description or title
+                          if title and link:
+                              items.append({
+                                  "title": title,
+                                  "link": link,
+                                  "source": source,
+                                  "category": cat_name if 'cat_name' in locals() else "",
+                                  "content": body
+                              })
+                      return items
               except Exception as e:
-                  print(f"fetch_url error: {e}")
-                  return ""
+                  return []
 
           def get_items(cat_name, query):
               urls = [
@@ -46,115 +66,73 @@ jobs:
                   "https://news.google.com/rss/search?" + urlencode({"q": query, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"}),
               ]
               for url in urls:
-                  try:
-                      req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                      with urlopen(req, timeout=15) as response:
-                          content = response.read()
-                          if content.strip().startswith(b"<!DOCTYPE") or content.strip().startswith(b"<html"):
-                              continue
-                          root = ET.fromstring(content)
-                          items = []
-                          for item in root.findall("./channel/item")[:8]:
-                              title = (item.findtext("title") or "").strip()
-                              link = (item.findtext("link") or "").strip()
-                              source_el = item.find("source")
-                              source = source_el.text.strip() if source_el is not None and source_el.text else "網絡新聞"
-                              description = (item.findtext("description") or "").strip()
-                              content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
-                              body = content_encoded or description or title
-                              if title and link:
-                                  items.append({
-                                      "title": title,
-                                      "link": link,
-                                      "source": source,
-                                      "category": cat_name,
-                                      "content": body
-                                  })
-                          if items:
-                              print(f"✅ {cat_name}: 从 {url} 获取到 {len(items)} 篇")
-                              return items
-                  except Exception as e:
-                      print(f"❌ {cat_name}: {url} 抓取失败: {e}")
-                      continue
+                  items = fetch_rss(url)
+                  if items:
+                      print(f"✅ {cat_name}: 获取到 {len(items)} 篇")
+                      return items
               return []
 
-          def clean_jina_text(text):
-              # 如果包含 Markdown Content: 标记，取其之后的内容
-              marker = "Markdown Content:"
-              if marker in text:
-                  text = text.split(marker, 1)[1]
-              # 按行清洗
-              lines = text.splitlines()
-              cleaned = []
-              for line in lines:
-                  line = line.strip()
-                  if not line:
-                      continue
-                  # 跳过图片行
-                  if line.startswith("![") or line.startswith("!["):
-                      continue
-                  # 跳过导航链接行（如 * [财经](...) 或 [财经](...)）
-                  if (line.startswith("* [") or line.startswith("- [") or line.startswith("[")) and "](" in line:
-                      continue
-                  # 跳过元数据行
-                  if line.startswith("Title:") or line.startswith("URL Source:") or line.startswith("Markdown Content:"):
-                      continue
-                  cleaned.append(line)
-              result = " ".join(cleaned)
-              result = " ".join(result.split())
-              return result
-
-          def fetch_full_text(item):
-              link = item["link"]
-              original = link
-              # 如果是 Google News 链接，尝试提取真实 URL
+          def extract_real_url(link):
               if "news.google.com" in link:
                   try:
-                      from urllib.parse import urlparse, parse_qs
                       parsed = urlparse(link)
                       qs = parse_qs(parsed.query)
                       if "url" in qs:
-                          original = qs["url"][0]
+                          return qs["url"][0]
                   except:
                       pass
+              return link
 
-              # 使用 Jina Reader 抓取，并请求纯文本格式
-              jina_url = "https://r.jina.ai/" + quote(original, safe="")
-              text = fetch_url(jina_url, timeout=20, headers={"X-Return-Format": "text"})
-              if text and len(text) > 200:
-                  cleaned = clean_jina_text(text)
-                  if len(cleaned) > 200:
-                      print(f"✅ 抓到正文: {item['title'][:30]}... 长度={len(cleaned)}")
-                      return cleaned[:4000]
-                  else:
-                      print(f"❌ 清洗后太短: {item['title'][:30]}... 清洗长度={len(cleaned)}")
-                      return ""
-              else:
-                  print(f"❌ 抓取失败: {item['title'][:30]}... 返回长度={len(text)}")
-                  return ""
+          def extract_article_text(link):
+              # 提取真实 URL
+              original = extract_real_url(link)
+              # 使用 trafilatura 直接下载并提取正文
+              try:
+                  downloaded = trafilatura.fetch_url(original)
+                  if downloaded:
+                      text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
+                      if text and len(text) > 200:
+                          return text[:4000]
+              except Exception as e:
+                  pass
+              # 如果 trafilatura 失败，尝试用 RSS 描述
+              # 注意：这里会在外层处理
+              return ""
 
           all_articles = []
           for cat_name, query in categories:
               items = get_items(cat_name, query)
               for item in items:
-                  full = fetch_full_text(item)
-                  if full:
-                      item["content"] = full
+                  full_text = extract_article_text(item["link"])
+                  if full_text:
+                      item["content"] = full_text
+                  else:
+                      # 回退：使用 RSS 描述，但至少要有一定长度
+                      desc = item.get("content", "")
+                      import re
+                      desc_clean = re.sub(r'<[^>]+>', ' ', desc)
+                      desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
+                      if len(desc_clean) > 100:
+                          item["content"] = desc_clean[:4000]
+                      else:
+                          item["content"] = ""
                   all_articles.append(item)
-                  time.sleep(0.5)
-              time.sleep(1)
+                  time.sleep(0.3)
+              time.sleep(0.5)
 
-          good = sum(1 for a in all_articles if len(a.get("content","")) > 200)
-          print(f"📊 总共 {len(all_articles)} 篇，其中正文有效 {good} 篇")
+          # 过滤掉 content 为空的文章
+          all_articles = [a for a in all_articles if a.get("content")]
+          good = len(all_articles)
+          print(f"📊 有效文章 {good} 篇")
 
           if not all_articles:
-              print("❌ 错误：未抓取到任何新闻，流程终止。")
+              print("❌ 没有有效文章")
               sys.exit(1)
 
           worker_url = "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest"
           secret = os.environ.get("INGEST_SECRET", "").strip()
           if not secret:
-              print("❌ 错误：GitHub Secret [INGEST_SECRET] 为空！请先去 Settings 配置。")
+              print("❌ 缺少 INGEST_SECRET")
               sys.exit(1)
 
           payload = json.dumps({"articles": all_articles}).encode("utf-8")
@@ -166,22 +144,17 @@ jobs:
                   "Content-Type": "application/json",
                   "Authorization": secret,
                   "x-admin-key": secret,
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                  "User-Agent": "Mozilla/5.0",
               },
           )
           try:
               with urlopen(req, timeout=30) as resp:
                   res_text = resp.read().decode("utf-8")
-                  print(f"✅ 發送成功 [{worker_url}]:", res_text)
+                  print(f"✅ 發送成功: {res_text}")
           except HTTPError as e:
-              err_body = e.read().decode("utf-8", errors="ignore")
-              print(f"❌ HTTP 请求失败！状态码: {e.code}, 原因: {e.reason}")
-              print(f"服务器返回信息: {err_body}")
+              print(f"❌ HTTP 错误: {e.code} {e.reason}")
               sys.exit(1)
           except URLError as e:
-              print(f"❌ 网络链接失败: {e.reason}")
-              sys.exit(1)
-          except Exception as e:
-              print(f"❌ 未知错误: {e}")
+              print(f"❌ 网络错误: {e.reason}")
               sys.exit(1)
           PY
