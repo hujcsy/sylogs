@@ -118,7 +118,7 @@ jobs:
               google_url = "https://news.google.com/rss/search?" + urlencode({
                   "q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
               items = fetch_rss(google_url, cat_name)
-                  print(f"✅ {cat_name}: Google 獲取到 {len(items)} 篇")
+              print(f"✅ {cat_name}: Google 獲取到 {len(items)} 篇")
               return items
 
           def translate_text(text, target_lang="zh-TW"):
@@ -148,7 +148,6 @@ jobs:
               try:
                   items = get_items(cat_name, query)
                   for item in items:
-                      # 內文過短時自動抓取原文補全
                       if len(item["content"]) < 150:
                           full = fetch_full_article(item["link"])
                           if len(full) > len(item["content"]):
@@ -156,7 +155,6 @@ jobs:
                       if len(item["content"]) < 30:
                           continue
                       
-                      # 翻譯標題與正文為繁體中文
                       try:
                           item["title"] = translate_text(item["title"])
                           item["content"] = translate_text(item["content"][:1000])
@@ -183,7 +181,6 @@ jobs:
               print("❌ 缺少 INGEST_SECRET")
               sys.exit(1)
 
-          # 分批發送（每批 5 篇），配合背景非同步入庫，既穩固又不會超時
           batch_size = 5
           for i in range(0, len(all_articles), batch_size):
               batch = all_articles[i:i+batch_size]
