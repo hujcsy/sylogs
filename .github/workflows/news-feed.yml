@@ -1,4 +1,4 @@
-name: 獲取新聞並發送至 Cloudflare D1
+name: 獲取新聞並發送至 Cloudflare D1（完整正文版）
 on:
   schedule:
     - cron: "17 */6 * * *"
@@ -8,7 +8,7 @@ jobs:
   fetch-and-send:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch RSS and POST to Cloudflare Worker
+      - name: Fetch RSS, extract full article, POST to Cloudflare Worker
         env:
           INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
         run: |
@@ -20,118 +20,157 @@ jobs:
           import time
           import re
           import html as html_lib
-          from urllib.parse import urlencode
-          from urllib.request import Request, urlopen
+          from urllib.parse import urlencode, urlparse, parse_qs, unquote
+          from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
           from urllib.error import HTTPError, URLError
           import xml.etree.ElementTree as ET
           from deep_translator import GoogleTranslator, MyMemoryTranslator
 
+          # 分類列表：補上原本缺失的「奇聞異事」，五個分類與網站 NEWS_CATEGORIES 對齊
           categories = [
               ("時事", "world news"),
               ("科技動態", "technology"),
               ("焦點新聞", "top stories"),
               ("金融", "finance"),
+              ("奇聞異事", "weird news"),
           ]
+
+          class RedirectHandler(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  newurl = newurl.replace(" ", "%20")
+                  return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+          opener = build_opener(RedirectHandler)
 
           def clean_html(raw):
               if not raw:
                   return ""
-              raw = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', raw, flags=re.DOTALL|re.IGNORECASE)
+              raw = re.sub(r'<(script|style|noscript)[^>]*>.*?</\1>', ' ', raw, flags=re.DOTALL | re.IGNORECASE)
               raw = re.sub(r'<[^>]+>', ' ', raw)
               raw = html_lib.unescape(raw)
               raw = re.sub(r'\s+', ' ', raw).strip()
               return raw
 
+          def fetch_url(url, timeout=15):
+              req = Request(url, headers={
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              })
+              with opener.open(req, timeout=timeout) as resp:
+                  return resp.read().decode("utf-8", errors="ignore")
+
+          def extract_main_text(html):
+              """優先取 <article> 或常見正文容器，否則取全頁文字。"""
+              m = re.search(r'<article[\s\S]*?</article>', html, re.I)
+              if m and len(m.group(0)) > 500:
+                  return clean_html(m.group(0))
+              m = re.search(
+                  r'<div[^>]*(?:class|id)=["\'][^"\']*(?:article-body|article__body|story-body|post-content|entry-content|articleBody|content-body|main-content|article)[^"\']*["\'][^>]*>[\s\S]*?</div>',
+                  html, re.I)
+              if m and len(m.group(0)) > 500:
+                  return clean_html(m.group(0))
+              return clean_html(html)
+
+          def fetch_full_article(link):
+              """RSS description 過短時，抓取原文頁面補全正文。"""
+              try:
+                  # Bing apiclick 鏈接先解出真實 URL
+                  target = link
+                  if "bing.com/news/apiclick" in link:
+                      q = parse_qs(urlparse(link).query)
+                      if q.get("url"):
+                          target = unquote(q["url"][0])
+                  html = fetch_url(target)
+                  if not html:
+                      return ""
+                  return extract_main_text(html)[:30000]
+              except Exception:
+                  return ""
+
           def fetch_rss(url):
               try:
-                  req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                  with urlopen(req, timeout=15) as resp:
-                      content = resp.read()
-                      root = ET.fromstring(content)
-                      items = []
-                      for item in root.findall("./channel/item")[:10]:
-                          title = (item.findtext("title") or "").strip()
-                          link = (item.findtext("link") or "").strip()
-                          source_el = item.find("source")
-                          source = source_el.text.strip() if source_el is not None and source_el.text else "International News"
-                          description = (item.findtext("description") or "").strip()
-                          content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
-                          raw_body = content_encoded or description
-                          body_clean = clean_html(raw_body)
-                          if title and link:
-                              items.append({
-                                  "title": title,
-                                  "link": link,
-                                  "source": source,
-                                  "category": cat_name,
-                                  "content": body_clean
-                              })
-                      return items
+                  content = fetch_url(url)
+                  root = ET.fromstring(content)
+                  items = []
+                  for item in root.findall("./channel/item")[:10]:
+                      title = (item.findtext("title") or "").strip()
+                      link = (item.findtext("link") or "").strip()
+                      source_el = item.find("source")
+                      source = source_el.text.strip() if source_el is not None and source_el.text else "International News"
+                      description = (item.findtext("description") or "").strip()
+                      content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
+                      body_clean = clean_html(content_encoded or description)
+                      if title and link:
+                          items.append({
+                              "title": title,
+                              "link": link,
+                              "source": source,
+                              "category": cat_name,
+                              "content": body_clean,
+                          })
+                  return items
               except Exception:
                   return []
 
           def get_items(cat_name, query):
               bing_url = "https://www.bing.com/news/search?" + urlencode({
-                  "q": query,
-                  "format": "rss",
-                  "mkt": "en-US"
-              })
+                  "q": query, "format": "rss", "mkt": "en-US"})
               items = fetch_rss(bing_url)
               if items:
-                  print(f"✅ {cat_name}: Bing 获取到 {len(items)} 篇")
+                  print(f"✅ {cat_name}: Bing 獲取到 {len(items)} 篇")
                   return items
               google_url = "https://news.google.com/rss/search?" + urlencode({
-                  "q": query,
-                  "hl": "en-US",
-                  "gl": "US",
-                  "ceid": "US:en"
-              })
+                  "q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
               items = fetch_rss(google_url)
-              print(f"✅ {cat_name}: Google 获取到 {len(items)} 篇")
+              print(f"✅ {cat_name}: Google 獲取到 {len(items)} 篇")
               return items
 
           def translate_text(text, target_lang="zh-TW"):
               if not text or len(text) < 10:
                   return text
-              # 限制翻译长度，避免超时
               text = text[:1000]
               try:
-                  # 优先 Google 翻译
                   translator = GoogleTranslator(source="auto", target="zh-TW")
                   result = translator.translate(text)
                   if result and len(result) > 5:
                       return result
               except Exception as e:
-                  print(f"Google 翻译失败: {e}")
+                  print(f"Google 翻譯失敗: {e}")
               try:
-                  # 回退 MyMemory 翻译（免费无需 key）
                   translator = MyMemoryTranslator(source="en", target="zh-TW")
                   result = translator.translate(text)
                   if result and len(result) > 5:
                       return result
               except Exception as e:
-                  print(f"MyMemory 翻译失败: {e}")
-              # 翻译失败保留原文
+                  print(f"MyMemory 翻譯失敗: {e}")
               return text
 
           all_articles = []
+          seen_links = set()
           for cat_name, query in categories:
               items = get_items(cat_name, query)
               for item in items:
-                  # 翻译标题和正文
+                  # 正文過短（只有標題級摘要）時抓取原文補全
+                  if len(item["content"]) < 150:
+                      full = fetch_full_article(item["link"])
+                      if len(full) > len(item["content"]):
+                          item["content"] = full
+                  if len(item["content"]) < 50:
+                      continue  # 抓不到正文就丟棄，避免入庫無意義的標題殘片
                   translated_title = translate_text(item["title"])
-                  translated_content = translate_text(item["content"])
+                  translated_content = translate_text(item["content"][:1000])
                   item["title"] = translated_title
                   item["content"] = translated_content
-                  all_articles.append(item)
-                  time.sleep(0.5)  # 避免请求过快
+                  if item["link"] not in seen_links:
+                      seen_links.add(item["link"])
+                      all_articles.append(item)
+                  time.sleep(0.5)
               time.sleep(1)
 
           good = len(all_articles)
           print(f"📊 有效文章 {good} 篇")
-
           if not all_articles:
-              print("❌ 没有有效文章")
+              print("❌ 沒有有效文章")
               sys.exit(1)
 
           worker_url = "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest"
@@ -153,13 +192,13 @@ jobs:
               },
           )
           try:
-              with urlopen(req, timeout=30) as resp:
+              with urlopen(req, timeout=60) as resp:
                   res_text = resp.read().decode("utf-8")
                   print(f"✅ 發送成功: {res_text}")
           except HTTPError as e:
-              print(f"❌ HTTP 错误: {e.code} {e.reason}")
+              print(f"❌ HTTP 錯誤: {e.code} {e.reason}")
               sys.exit(1)
           except URLError as e:
-              print(f"❌ 网络错误: {e.reason}")
+              print(f"❌ 網絡錯誤: {e.reason}")
               sys.exit(1)
           PY
