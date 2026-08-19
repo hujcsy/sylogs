@@ -12,7 +12,6 @@ jobs:
         env:
           INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
         run: |
-          pip install deep-translator --quiet
           python - <<'PY'
           import json
           import os
@@ -24,9 +23,7 @@ jobs:
           from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
           from urllib.error import HTTPError, URLError
           import xml.etree.ElementTree as ET
-          from deep_translator import GoogleTranslator, MyMemoryTranslator
 
-          # 分類列表
           categories = [
               ("時事", "world news"),
               ("科技動態", "technology"),
@@ -122,55 +119,25 @@ jobs:
               print(f"✅ {cat_name}: Google 獲取到 {len(items)} 篇")
               return items
 
-          def translate_text(text, target_lang="zh-TW"):
-              if not text or len(text) < 2:
-                  return text
-              text_to_trans = text[:1000]
-              
-              # 嘗試使用 Google 翻譯
-              try:
-                  translator = GoogleTranslator(source="auto", target=target_lang)
-                  result = translator.translate(text_to_trans)
-                  if result:
-                      return result
-              except Exception as e:
-                  pass
-
-              # 備援：嘗試使用 MyMemory 翻譯
-              try:
-                  translator = MyMemoryTranslator(source="en", target=target_lang)
-                  result = translator.translate(text_to_trans)
-                  if result:
-                      return result
-              except Exception as e:
-                  pass
-
-              # 如果兩者皆失敗，則直接回傳原文，避免腳本崩潰
-              return text
-
           all_articles = []
           seen_links = set()
           for cat_name, query in categories:
-              items = get_items(cat_name, query)
-              for item in items:
-                  if len(item["content"]) < 150:
-                      full = fetch_full_article(item["link"])
-                      if len(full) > len(item["content"]):
-                          item["content"] = full
-                  if len(item["content"]) < 30:
-                      continue
-                  
-                  # 翻譯標題與正文並加入防護
-                  try:
-                      item["title"] = translate_text(item["title"])
-                      item["content"] = translate_text(item["content"][:1000])
-                  except Exception:
-                      pass
-
-                  if item["link"] not in seen_links:
-                      seen_links.add(item["link"])
-                      all_articles.append(item)
-                  time.sleep(0.3)
+              try:
+                  items = get_items(cat_name, query)
+                  for item in items:
+                      if len(item["content"]) < 150:
+                          full = fetch_full_article(item["link"])
+                          if len(full) > len(item["content"]):
+                              item["content"] = full
+                      if len(item["content"]) < 30:
+                          continue
+                      
+                      if item["link"] not in seen_links:
+                          seen_links.add(item["link"])
+                          all_articles.append(item)
+                      time.sleep(0.2)
+              except Exception as e:
+                  print(f"⚠️ 處理分類 {cat_name} 時發生錯誤: {e}")
               time.sleep(0.5)
 
           good = len(all_articles)
@@ -185,26 +152,36 @@ jobs:
               print("❌ 缺少 INGEST_SECRET")
               sys.exit(1)
 
-          payload = json.dumps({"articles": all_articles}).encode("utf-8")
-          req = Request(
-              worker_url,
-              data=payload,
-              method="POST",
-              headers={
-                  "Content-Type": "application/json",
-                  "Authorization": secret,
-                  "x-admin-key": secret,
-                  "User-Agent": "Mozilla/5.0",
-              },
-          )
-          try:
-              with urlopen(req, timeout=60) as resp:
-                  res_text = resp.read().decode("utf-8")
-                  print(f"✅ 發送成功: {res_text}")
-          except HTTPError as e:
-              print(f"❌ HTTP 錯誤: {e.code} {e.reason}")
-              sys.exit(1)
-          except URLError as e:
-              print(f"❌ 網絡錯誤: {e.reason}")
-              sys.exit(1)
+          # 改為分批發送（每批 10 篇），避免單次封包過大導致 Timeout
+          batch_size = 10
+          for i in range(0, len(all_articles), batch_size):
+              batch = all_articles[i:i+batch_size]
+              print(f"📤 正在發送第 {i//batch_size + 1} 批次（共 {len(batch)} 篇）...")
+              
+              payload = json.dumps({"articles": batch}).encode("utf-8")
+              req = Request(
+                  worker_url,
+                  data=payload,
+                  method="POST",
+                  headers={
+                      "Content-Type": "application/json",
+                      "Authorization": secret,
+                      "x-admin-key": secret,
+                      "User-Agent": "Mozilla/5.0",
+                  },
+              )
+              try:
+                  with urlopen(req, timeout=60) as resp:
+                      res_text = resp.read().decode("utf-8")
+                      print(f"✅ 第 {i//batch_size + 1} 批次發送成功: {res_text}")
+              except HTTPError as e:
+                  print(f"❌ HTTP 錯誤: {e.code} {e.reason}")
+                  sys.exit(1)
+              except URLError as e:
+                  print(f"❌ 網絡錯誤: {e.reason}")
+                  sys.exit(1)
+              
+              time.sleep(1) # 批次之間稍作暫停
+
+          print("🎉 所有文章成功發送完畢！")
           PY
