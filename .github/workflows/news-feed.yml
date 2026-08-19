@@ -12,6 +12,7 @@ jobs:
         env:
           INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
         run: |
+          pip install deep-translator --quiet
           python - <<'PY'
           import json
           import os
@@ -23,6 +24,7 @@ jobs:
           from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
           from urllib.error import HTTPError, URLError
           import xml.etree.ElementTree as ET
+          from deep_translator import GoogleTranslator, MyMemoryTranslator
 
           categories = [
               ("時事", "world news"),
@@ -48,7 +50,7 @@ jobs:
               raw = re.sub(r'\s+', ' ', raw).strip()
               return raw
 
-          def fetch_url(url, timeout=10):
+          def fetch_url(url, timeout=12):
               req = Request(url, headers={
                   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
                   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -77,8 +79,7 @@ jobs:
                   html = fetch_url(target)
                   if not html:
                       return ""
-                  # 將單篇正文限制在 1500 字以內，避免封包過大導致 Worker 超時
-                  return extract_main_text(html)[:1500]
+                  return extract_main_text(html)[:2000]
               except Exception:
                   return ""
 
@@ -94,7 +95,7 @@ jobs:
                       source = source_el.text.strip() if source_el is not None and source_el.text else "International News"
                       description = (item.findtext("description") or "").strip()
                       content_encoded = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
-                      body_clean = clean_html(content_encoded or description)[:1500]
+                      body_clean = clean_html(content_encoded or description)[:2000]
                       if title and link:
                           items.append({
                               "title": title,
@@ -117,32 +118,61 @@ jobs:
               google_url = "https://news.google.com/rss/search?" + urlencode({
                   "q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
               items = fetch_rss(google_url, cat_name)
-              print(f"✅ {cat_name}: Google 獲取到 {len(items)} 篇")
+                  print(f"✅ {cat_name}: Google 獲取到 {len(items)} 篇")
               return items
+
+          def translate_text(text, target_lang="zh-TW"):
+              if not text or len(text) < 2:
+                  return text
+              text_to_trans = text[:1000]
+              try:
+                  translator = GoogleTranslator(source="auto", target=target_lang)
+                  result = translator.translate(text_to_trans)
+                  if result:
+                      return result
+              except Exception:
+                  pass
+              try:
+                  translator = MyMemoryTranslator(source="en", target=target_lang)
+                  result = translator.translate(text_to_trans)
+                  if result:
+                      return result
+              except Exception:
+                  pass
+              return text
 
           all_articles = []
           seen_links = set()
+          print("🔄 開始獲取並翻譯新聞...")
           for cat_name, query in categories:
               try:
                   items = get_items(cat_name, query)
                   for item in items:
-                      if len(item["content"]) < 100:
+                      # 內文過短時自動抓取原文補全
+                      if len(item["content"]) < 150:
                           full = fetch_full_article(item["link"])
                           if len(full) > len(item["content"]):
                               item["content"] = full
-                      if len(item["content"]) < 20:
+                      if len(item["content"]) < 30:
                           continue
                       
+                      # 翻譯標題與正文為繁體中文
+                      try:
+                          item["title"] = translate_text(item["title"])
+                          item["content"] = translate_text(item["content"][:1000])
+                      except Exception:
+                          pass
+
                       if item["link"] not in seen_links:
                           seen_links.add(item["link"])
                           all_articles.append(item)
-                      time.sleep(0.1)
+                      time.sleep(0.2)
               except Exception as e:
                   print(f"⚠️ 處理分類 {cat_name} 時發生錯誤: {e}")
-              time.sleep(0.3)
+              time.sleep(0.5)
 
           good = len(all_articles)
-          print(f"📊 有效文章 {good} 篇")
+          print(f"📊 有效且已翻譯文章總計 {good} 篇，準備發送到 Worker...")
           if not all_articles:
               print("❌ 沒有有效文章")
               sys.exit(1)
@@ -153,7 +183,7 @@ jobs:
               print("❌ 缺少 INGEST_SECRET")
               sys.exit(1)
 
-          # 將批次縮小至每批 5 篇，確保每次傳輸快速且絕對不會超時
+          # 分批發送（每批 5 篇），配合背景非同步入庫，既穩固又不會超時
           batch_size = 5
           for i in range(0, len(all_articles), batch_size):
               batch = all_articles[i:i+batch_size]
@@ -184,5 +214,5 @@ jobs:
               
               time.sleep(0.5)
 
-          print("🎉 所有文章成功發送完畢！")
+          print("🎉 所有文章成功翻譯並發送完畢！")
           PY
