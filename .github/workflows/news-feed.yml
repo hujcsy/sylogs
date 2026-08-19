@@ -26,7 +26,7 @@ jobs:
           import xml.etree.ElementTree as ET
           from deep_translator import GoogleTranslator, MyMemoryTranslator
 
-          # 分類列表：補上原本缺失的「奇聞異事」，五個分類與網站 NEWS_CATEGORIES 對齊
+          # 分類列表
           categories = [
               ("時事", "world news"),
               ("科技動態", "technology"),
@@ -60,7 +60,6 @@ jobs:
                   return resp.read().decode("utf-8", errors="ignore")
 
           def extract_main_text(html):
-              """優先取 <article> 或常見正文容器，否則取全頁文字。"""
               m = re.search(r'<article[\s\S]*?</article>', html, re.I)
               if m and len(m.group(0)) > 500:
                   return clean_html(m.group(0))
@@ -72,9 +71,7 @@ jobs:
               return clean_html(html)
 
           def fetch_full_article(link):
-              """RSS description 過短時，抓取原文頁面補全正文。"""
               try:
-                  # Bing apiclick 鏈接先解出真實 URL
                   target = link
                   if "bing.com/news/apiclick" in link:
                       q = parse_qs(urlparse(link).query)
@@ -87,7 +84,7 @@ jobs:
               except Exception:
                   return ""
 
-          def fetch_rss(url):
+          def fetch_rss(url, cat_name):
               try:
                   content = fetch_url(url)
                   root = ET.fromstring(content)
@@ -115,34 +112,40 @@ jobs:
           def get_items(cat_name, query):
               bing_url = "https://www.bing.com/news/search?" + urlencode({
                   "q": query, "format": "rss", "mkt": "en-US"})
-              items = fetch_rss(bing_url)
+              items = fetch_rss(bing_url, cat_name)
               if items:
                   print(f"✅ {cat_name}: Bing 獲取到 {len(items)} 篇")
                   return items
               google_url = "https://news.google.com/rss/search?" + urlencode({
                   "q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
-              items = fetch_rss(google_url)
+              items = fetch_rss(google_url, cat_name)
               print(f"✅ {cat_name}: Google 獲取到 {len(items)} 篇")
               return items
 
           def translate_text(text, target_lang="zh-TW"):
-              if not text or len(text) < 10:
+              if not text or len(text) < 2:
                   return text
-              text = text[:1000]
+              text_to_trans = text[:1000]
+              
+              # 嘗試使用 Google 翻譯
               try:
-                  translator = GoogleTranslator(source="auto", target="zh-TW")
-                  result = translator.translate(text)
-                  if result and len(result) > 5:
+                  translator = GoogleTranslator(source="auto", target=target_lang)
+                  result = translator.translate(text_to_trans)
+                  if result:
                       return result
               except Exception as e:
-                  print(f"Google 翻譯失敗: {e}")
+                  pass
+
+              # 備援：嘗試使用 MyMemory 翻譯
               try:
-                  translator = MyMemoryTranslator(source="en", target="zh-TW")
-                  result = translator.translate(text)
-                  if result and len(result) > 5:
+                  translator = MyMemoryTranslator(source="en", target=target_lang)
+                  result = translator.translate(text_to_trans)
+                  if result:
                       return result
               except Exception as e:
-                  print(f"MyMemory 翻譯失敗: {e}")
+                  pass
+
+              # 如果兩者皆失敗，則直接回傳原文，避免腳本崩潰
               return text
 
           all_articles = []
@@ -150,22 +153,25 @@ jobs:
           for cat_name, query in categories:
               items = get_items(cat_name, query)
               for item in items:
-                  # 正文過短（只有標題級摘要）時抓取原文補全
                   if len(item["content"]) < 150:
                       full = fetch_full_article(item["link"])
                       if len(full) > len(item["content"]):
                           item["content"] = full
-                  if len(item["content"]) < 50:
-                      continue  # 抓不到正文就丟棄，避免入庫無意義的標題殘片
-                  translated_title = translate_text(item["title"])
-                  translated_content = translate_text(item["content"][:1000])
-                  item["title"] = translated_title
-                  item["content"] = translated_content
+                  if len(item["content"]) < 30:
+                      continue
+                  
+                  # 翻譯標題與正文並加入防護
+                  try:
+                      item["title"] = translate_text(item["title"])
+                      item["content"] = translate_text(item["content"][:1000])
+                  except Exception:
+                      pass
+
                   if item["link"] not in seen_links:
                       seen_links.add(item["link"])
                       all_articles.append(item)
-                  time.sleep(0.5)
-              time.sleep(1)
+                  time.sleep(0.3)
+              time.sleep(0.5)
 
           good = len(all_articles)
           print(f"📊 有效文章 {good} 篇")
