@@ -1,4 +1,4 @@
-name: 獲取新聞並發送至 Cloudflare D1（完整正文版）
+name: 獲取新聞並發送至 Cloudflare D1（完整正文版 v2 - 垃圾過濾）
 
 on:
   schedule:
@@ -62,13 +62,36 @@ jobs:
               with opener.open(req, timeout=timeout) as resp:
                   return resp.read().decode("utf-8", errors="ignore")
 
+          # ===== v2 新增：错误页 / 垃圾文本特征 =====
+          JUNK_PATTERNS = [
+              r"error\s*500",
+              r"that's an error",
+              r"please try again later",
+              r"server error",
+              r"the requested url was rejected",
+              r"access denied",
+              r"attention required",
+              r"robot check",
+              r"captcha",
+              r"blocked",
+          ]
+          JUNK_RE = re.compile("|".join(JUNK_PATTERNS), re.I)
+
+          def is_junk(text):
+              if not text:
+                  return True
+              return bool(JUNK_RE.search(text))
+
           def extract_main_text_bs(html_content):
               if not html_content:
+                  return ""
+              # v2：错误页直接判定为抓取失败
+              if JUNK_RE.search(html_content):
                   return ""
               soup = BeautifulSoup(html_content, 'html.parser')
               for element in soup(["script", "style", "nav", "footer", "header", "aside", "form", "iframe", "noscript"]):
                   element.decompose()
-              
+
               candidates = soup.find_all(['article', 'div'], class_=re.compile(r'article|story|post|content|text|body', re.I))
               best_text = ""
               for cand in candidates:
@@ -116,7 +139,8 @@ jobs:
                       source = source_el.text.strip() if source_el is not None and source_el.text else "News"
                       description = (item.findtext("description") or "").strip()
                       desc_clean = clean_text(re.sub(r'<[^>]+>', ' ', description))
-                      if title and link:
+                      # v2：RSS 标题本身是错误页文本 → 丢弃
+                      if title and link and not is_junk(title) and not is_junk(desc_clean):
                           items.append({
                               "title": title, "link": link, "source": source,
                               "category": cat_name, "content": desc_clean,
@@ -148,13 +172,21 @@ jobs:
                           full = fetch_full_article(item["link"])
                           if len(full) > 50:
                               item["content"] = full
-                          
-                          if len(item["content"]) > 20:
-                              item["title"] = translate_text(item["title"])
-                              item["content"] = translate_text(item["content"])
-                              all_articles.append(item)
-                              seen_links.add(item["link"])
-                              time.sleep(0.5)
+
+                          # v2：正文必须是有效新闻内容（长度足够且不是错误页）
+                          clean_len = len(item["content"].replace("\n", " ").strip())
+                          if clean_len < 200 or is_junk(item["content"]):
+                              print(f"⏭️ 跳過 (正文無效, len={clean_len}): {item['title'][:30]}")
+                              continue
+
+                          item["title"] = translate_text(item["title"])
+                          item["content"] = translate_text(item["content"])
+                          # v2：翻译后再次检查（防止翻译结果异常）
+                          if is_junk(item["title"]) or len(item["content"]) < 80:
+                              continue
+                          all_articles.append(item)
+                          seen_links.add(item["link"])
+                          time.sleep(0.5)
               except Exception as e:
                   print(f"⚠️ 分類 {cat_name} 出錯: {e}")
 
@@ -164,7 +196,7 @@ jobs:
 
           worker_url = "https://sylogs-news-fetcher.hjlaochi-27c.workers.dev/ingest"
           secret = os.environ.get("INGEST_SECRET", "").strip()
-          
+
           for i in range(0, len(all_articles), 5):
               batch = all_articles[i:i+5]
               payload = json.dumps({"articles": batch}).encode("utf-8")
