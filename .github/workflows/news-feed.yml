@@ -76,6 +76,17 @@ jobs:
           ]
           JUNK_RE = re.compile("|".join(JUNK_PATTERNS), re.I)
 
+          # ===== 奇聞異事內容分流（v3.1 新增）=====
+          # 背景：UPI odd 源混雜大量名人/娛樂/訃聞/生日專欄，若整源歸入「奇聞異事」，
+          # 會把本應屬「時事」的新聞錯置（例如藝術家過世、名人軼事）。
+          # 此處按標題信號分流：
+          #   1) 純 trivia 專欄（famous birthdays / almanac 等）→ 直接丟棄
+          #   2) 名人/訃聞類新聞 → 改歸「時事」
+          #   3) 其餘保持「奇聞異事」
+          TRIVIA_RE = re.compile(r"famous birthday|birthdays|almanac|on this day|today in history|quote of the day|trivia", re.I)
+          CELEB_DEATH_RE = re.compile(r"dies at|dies$|died|dead at|death|obituary|remembering|tribute|funeral|survived by", re.I)
+          CELEB_FIGURE_RE = re.compile(r"celebrity|famous|movie star|tv star|actor|actress|singer|artist|painter|musician|filmmaker|director|author|model", re.I)
+
           def is_junk(text):
               if not text:
                   return True
@@ -170,6 +181,14 @@ jobs:
                       items = fetch_rss(feed, cat_name)
                       print(f"📡 {cat_name} @ {feed.split('/')[2]}: {len(items)} 條")
                       for item in items:
+                          # 奇聞異事內容分流：trivia 專欄丟棄；名人/訃聞改歸「時事」
+                          if cat_name == "奇聞異事":
+                              if TRIVIA_RE.search(item["title"]):
+                                  print(f"⏭️ 丟棄 trivia 專欄: {item['title'][:30]}")
+                                  continue
+                              if CELEB_DEATH_RE.search(item["title"]) and CELEB_FIGURE_RE.search(item["title"]):
+                                  item["category"] = "時事"
+                                  print(f"↩️ 名人訃聞改歸時事: {item['title'][:30]}")
                           if item["link"] not in seen_links:
                               print(f"🌐 正在解析: {item['title'][:20]}...")
                               full = fetch_full_article(item["link"])
